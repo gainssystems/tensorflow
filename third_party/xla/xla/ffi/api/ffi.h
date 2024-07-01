@@ -216,7 +216,8 @@ class AnyBuffer {
 
   XLA_FFI_ATTRIBUTE_ALWAYS_INLINE size_t element_count() const {
     Dimensions dims = dimensions();
-    return std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>());
+    return std::accumulate(dims.begin(), dims.end(), int64_t{1},
+                           std::multiplies<>());
   }
 
   void* untyped_data() const { return buf_->data; }
@@ -325,9 +326,39 @@ static_assert(!IsComplexType<DataType::F32>());
 // The dtype and rank are checked at decoding time. If rank is not specified,
 // any rank is accepted.
 template <DataType dtype, size_t rank = internal::kDynamicRank>
-struct Buffer {
-  NativeType<dtype>* data;
-  Span<const int64_t> dimensions;
+class Buffer {
+ public:
+  using Dimensions = AnyBuffer::Dimensions;
+
+  explicit Buffer(const XLA_FFI_Buffer* buf) : buf_(buf) {
+    assert(buf_ != nullptr && "XLA_FFI_Buffer must be non-null");
+  }
+
+  DataType element_type() const { return dtype; }
+
+  Dimensions dimensions() const {
+    return Dimensions(buf_->dims,
+                      rank == internal::kDynamicRank ? buf_->rank : rank);
+  }
+
+  XLA_FFI_ATTRIBUTE_ALWAYS_INLINE size_t size_bytes() const {
+    return ByteWidth(dtype) * element_count();
+  }
+
+  XLA_FFI_ATTRIBUTE_ALWAYS_INLINE size_t element_count() const {
+    Dimensions dims = dimensions();
+    return std::accumulate(dims.begin(), dims.end(), int64_t{1},
+                           std::multiplies<>());
+  }
+
+  void* untyped_data() const { return buf_->data; }
+
+  NativeType<dtype>* typed_data() const {
+    return reinterpret_cast<NativeType<dtype>*>(untyped_data());
+  }
+
+ private:
+  const XLA_FFI_Buffer* buf_;
 };
 
 // clang-format off
@@ -358,10 +389,7 @@ XLA_FFI_ATTRIBUTE_ALWAYS_INLINE std::optional<Buffer<dtype, rank>> DecodeBuffer(
     }
   }
 
-  Buffer<dtype, rank> buffer;
-  buffer.data = static_cast<NativeType<dtype>*>(buf->data);
-  buffer.dimensions = Span<const int64_t>(buf->dims, buf->rank);
-  return buffer;
+  return Buffer<dtype, rank>(buf);
 }
 
 }  // namespace internal
@@ -488,7 +516,7 @@ struct RetDecoding<Buffer<dtype, rank>> {
 // Attributes decoding
 //===----------------------------------------------------------------------===//
 
-#define XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING(T, TYPE)                      \
+#define XLA_FFI_REGISTER_ARRAY_ATTR_DECODING(T, TYPE)                       \
   template <>                                                               \
   struct AttrDecoding<Span<const T>> {                                      \
     using Type = Span<const T>;                                             \
@@ -509,14 +537,14 @@ struct RetDecoding<Buffer<dtype, rank>> {
     }                                                                       \
   }
 
-XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING(int8_t, XLA_FFI_DataType_S8);
-XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING(int16_t, XLA_FFI_DataType_S16);
-XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING(int32_t, XLA_FFI_DataType_S32);
-XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING(int64_t, XLA_FFI_DataType_S64);
-XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING(float, XLA_FFI_DataType_F32);
-XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING(double, XLA_FFI_DataType_F64);
+XLA_FFI_REGISTER_ARRAY_ATTR_DECODING(int8_t, XLA_FFI_DataType_S8);
+XLA_FFI_REGISTER_ARRAY_ATTR_DECODING(int16_t, XLA_FFI_DataType_S16);
+XLA_FFI_REGISTER_ARRAY_ATTR_DECODING(int32_t, XLA_FFI_DataType_S32);
+XLA_FFI_REGISTER_ARRAY_ATTR_DECODING(int64_t, XLA_FFI_DataType_S64);
+XLA_FFI_REGISTER_ARRAY_ATTR_DECODING(float, XLA_FFI_DataType_F32);
+XLA_FFI_REGISTER_ARRAY_ATTR_DECODING(double, XLA_FFI_DataType_F64);
 
-#undef XLA_FFI_REGISTER_ARRRAY_ATTR_DECODING
+#undef XLA_FFI_REGISTER_ARRAY_ATTR_DECODING
 
 // A type tag to mark i64 attributes as pointers to `T`.
 template <typename T>
