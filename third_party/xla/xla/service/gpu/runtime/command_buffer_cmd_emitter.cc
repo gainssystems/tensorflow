@@ -23,6 +23,7 @@ limitations under the License.
 #include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/runtime/command_buffer_cmd.h"
 #include "xla/service/gpu/runtime/conditional_thunk.h"
 #include "xla/service/gpu/runtime/copy_thunk.h"
@@ -34,6 +35,7 @@ limitations under the License.
 #include "xla/service/gpu/runtime/memset_thunk.h"
 #include "xla/service/gpu/runtime/nccl_all_gather_thunk.h"
 #include "xla/service/gpu/runtime/nccl_all_reduce_thunk.h"
+#include "xla/service/gpu/runtime/nccl_all_to_all_thunk.h"
 #include "xla/service/gpu/runtime/nccl_collective_thunk.h"
 #include "xla/service/gpu/runtime/replica_id_thunk.h"
 #include "xla/service/gpu/runtime/sequential_thunk.h"
@@ -172,6 +174,13 @@ static absl::StatusOr<Command> Convert(
       thunk.buffers());
 }
 
+static absl::StatusOr<Command> Convert(const NcclAllToAllStartThunk& thunk) {
+  return std::make_unique<AllToAllCmd>(
+      thunk.nccl_execution_stream_id(), thunk.execution_stream_id(),
+      thunk.nccl_api(), thunk.config(), thunk.has_split_dimension(),
+      thunk.buffers());
+}
+
 static absl::StatusOr<Command> Convert(const NcclAllGatherStartThunk& thunk) {
   return std::make_unique<AllGatherCmd>(
       thunk.nccl_execution_stream_id(), thunk.execution_stream_id(),
@@ -269,6 +278,8 @@ static absl::Status AppendCommands(
       return append(Convert<NcclAllReduceStartThunk>(thunk));
     case Thunk::Kind::kNcclReduceScatterStart:
       return append(Convert<NcclReduceScatterStartThunk>(thunk));
+    case Thunk::Kind::kNcclAllToAllStart:
+      return append(Convert<NcclAllToAllStartThunk>(thunk));
     case Thunk::Kind::kPartitionId:
       return append(Convert<PartitionIdThunk>(thunk));
     case Thunk::Kind::kReplicaId:
@@ -288,10 +299,18 @@ static absl::Status AppendCommands(
     case Thunk::Kind::kNcclAllGatherDone:
     case Thunk::Kind::kNcclAllReduceDone:
     case Thunk::Kind::kNcclReduceScatterDone:
+    case Thunk::Kind::kNcclAllToAllDone:
       return append(Convert<NcclCollectiveDoneThunk>(thunk));
 
     case Thunk::Kind::kWaitForStreams:
       return append(Convert<WaitForStreamsThunk>(thunk));
+
+    case Thunk::Kind::kCommandBuffer:
+      return Internal(
+          "Error trying to emit command for a CommandBufferThunk. Input HLO "
+          "must already contain command buffers and XLA should not run command "
+          "buffer scheduling pass the second time. It it happens in the test, "
+          "try explicitly disabling command buffers in tested HLO module.");
 
     default:
       return Internal("Unsupported thunk kind: %s",

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package tensorflow;
 
+import "xla/tsl/protobuf/coordination_config.proto";
 import "tensorflow/core/framework/cost_graph.proto";
 import "tensorflow/core/framework/graph.proto";
 import "tensorflow/core/framework/step_stats.proto";
@@ -9,7 +10,6 @@ import "tensorflow/core/protobuf/cluster.proto";
 import "tensorflow/core/protobuf/debug.proto";
 import "tensorflow/core/protobuf/rewriter_config.proto";
 import "tensorflow/core/protobuf/rpc_options.proto";
-import "tsl/protobuf/coordination_config.proto";
 
 option cc_enable_arenas = true;
 option java_outer_classname = "ConfigProtos";
@@ -536,6 +536,9 @@ message ConfigProto {
   // Options that apply to all GPUs.
   GPUOptions gpu_options = 6;
 
+  // Options that apply to pluggable devices.
+  GPUOptions pluggable_device_options = 18;
+
   // Whether soft placement is allowed. If allow_soft_placement is true,
   // an op will be placed on CPU if
   //   1. there's no GPU implementation for the OP
@@ -713,6 +716,10 @@ message ConfigProto {
     // If true, use Pathways with TFRT API for multi host support.
     bool enable_multi_host = 27;
 
+    // If true, use ifrt as the backend for TFRT. This is only used when
+    // `use_tfrt` is true.
+    bool tfrt_use_ifrt = 32;
+
     // Port for the Pathways server. Ignored if enable_multi_host=false.
     int32 backend_server_port = 28;
 
@@ -767,12 +774,12 @@ message ConfigProto {
 
     reserved 25;
 
-    // Next: 32
+    // Next: 33
   }
 
   Experimental experimental = 16;
 
-  // Next: 18
+  // Next: 19
 }
 
 // Options for a single Run() call.

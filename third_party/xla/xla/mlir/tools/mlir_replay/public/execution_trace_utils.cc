@@ -30,18 +30,19 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/IR/Attributes.h"  // from @llvm-project
-#include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
-#include "mlir/IR/BuiltinTypeInterfaces.h"  // from @llvm-project
-#include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
-#include "mlir/IR/Region.h"  // from @llvm-project
-#include "mlir/IR/Types.h"  // from @llvm-project
-#include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Region.h"
+#include "mlir/IR/Types.h"
+#include "mlir/Support/LLVM.h"
 #include "xla/literal.h"
 #include "xla/mlir/tools/mlir_interpreter/framework/interpreter_value.h"
 #include "xla/mlir/tools/mlir_interpreter/framework/tensor_or_memref.h"
 #include "xla/mlir/tools/mlir_replay/public/execution_trace.pb.h"
+#include "xla/primitive_util.h"
 #include "tsl/platform/statusor.h"
 
 namespace mlir {
@@ -126,10 +127,6 @@ struct TraceInterpreterValueVisitor {
   template <typename T>
   static TracedValue::ElementType GetElementType(const std::complex<T>&) {
     return TracedValue::COMPLEX;
-  }
-
-  static TracedValue::ElementType GetElementType(const Tuple&) {
-    return TracedValue::UNKNOWN;
   }
 };
 
@@ -255,7 +252,13 @@ absl::StatusOr<InterpreterValue> LiteralToValue(const xla::Literal& literal) {
   }
 
   if (literal.shape().IsArray()) {
-    switch (literal.shape().element_type()) {
+    auto type = literal.shape().element_type();
+    if (xla::primitive_util::IsF8Type(type)) {
+      return absl::UnimplementedError(
+          absl::StrCat(xla::primitive_util::LowercasePrimitiveTypeName(type),
+                       " not implemented"));
+    }
+    switch (type) {
       case xla::PRED:
         return {{ArrayLiteralToTensor<bool>(literal)}};
       case xla::S8:
@@ -282,16 +285,6 @@ absl::StatusOr<InterpreterValue> LiteralToValue(const xla::Literal& literal) {
         return absl::UnimplementedError("BF16 not implemented");
       case xla::F64:
         return {{ArrayLiteralToTensor<double>(literal)}};
-      case xla::F8E5M2:
-        return absl::UnimplementedError("F8E5M2 not implemented");
-      case xla::F8E4M3FN:
-        return absl::UnimplementedError("F8E4M3FN not implemented");
-      case xla::F8E4M3B11FNUZ:
-        return absl::UnimplementedError("F8E4M3B11FNUZ not implemented");
-      case xla::F8E5M2FNUZ:
-        return absl::UnimplementedError("F8E5M2FNUZ not implemented");
-      case xla::F8E4M3FNUZ:
-        return absl::UnimplementedError("F8E4M3FNUZ not implemented");
       case xla::C64:
         return {{ArrayLiteralToTensor<std::complex<float>>(literal)}};
       case xla::C128:

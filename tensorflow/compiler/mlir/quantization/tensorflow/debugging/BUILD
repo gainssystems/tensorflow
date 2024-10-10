@@ -44,6 +44,7 @@ tf_cc_test(
     deps = [
         ":mlir_dump",
         "@com_google_absl//absl/cleanup",
+        "@com_google_absl//absl/strings:string_view",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
@@ -51,11 +52,11 @@ tf_cc_test(
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Transforms",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:path",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
         "@stablehlo//:stablehlo_ops",
     ],
 )

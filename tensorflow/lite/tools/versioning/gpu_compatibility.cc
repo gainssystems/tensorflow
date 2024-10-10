@@ -23,6 +23,7 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "tensorflow/lite/builtin_op_data.h"
 #include "tensorflow/lite/builtin_ops.h"
+#include "tensorflow/lite/c/c_api_types.h"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/tools/versioning/op_signature.h"
 
@@ -626,6 +627,54 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig,
       return absl::OkStatus();
     }
 
+    case kTfLiteBuiltinEmbeddingLookup: {
+      const int num_inputs = op_sig.inputs.size();
+      const OpSignatureTensorSpec ids_spec = op_sig.inputs[0];
+      const OpSignatureTensorSpec value_spec = op_sig.inputs[1];
+      const OpSignatureTensorSpec output_spec = op_sig.outputs[0];
+      if (num_inputs != 2) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Expected 2, but got ", num_inputs, " inputs."));
+      }
+
+      if (ids_spec.dims.size() != 1) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Expected 1D, but got ", ids_spec.dims.size(), "D input #0."));
+      }
+
+      if (value_spec.dims.size() < 2) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Expected > 1D, but got ", value_spec.dims.size(), "D input #1."));
+      }
+
+      if (op_sig.outputs.size() != 1) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Expected 1, but got ", op_sig.outputs.size(), " outputs."));
+      }
+
+      if (value_spec.dims.size() != output_spec.dims.size()) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Expected ", value_spec.dims.size(), ", but got ",
+                         output_spec.dims.size(), " for output."));
+      }
+
+      for (int i = 1; i < output_spec.dims.size(); ++i) {
+        if (value_spec.dims[i] != output_spec.dims[i]) {
+          return absl::InvalidArgumentError(
+              absl::StrCat("Expected ", value_spec.dims[i], ", but got ",
+                           output_spec.dims[i], " for output.dim[", i, "]."));
+        }
+      }
+
+      if (value_spec.type != kTfLiteInt8 && value_spec.type != kTfLiteInt4 &&
+          value_spec.type != kTfLiteFloat32) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Expected int8, int4, or float32, but got ",
+                         TfLiteTypeGetName(value_spec.type), " for input #1."));
+      }
+      return absl::OkStatus();
+    }
+
     case kTfLiteBuiltinDynamicUpdateSlice: {
       if (op_sig.inputs.size() != 3) {
         return absl::UnimplementedError(
@@ -712,9 +761,6 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig,
                .ok()) {
         return absl::InvalidArgumentError(
             "Op can only handle 1 or 2 operand(s).");
-      }
-      if (op_sig.inputs.at(0).type == kTfLiteInt32) {
-        return absl::UnimplementedError("Does not accept INT32 input.\n");
       }
       if (op_sig.inputs[1].dims.size() != 1) {
         return absl::UnimplementedError("Only support 1D indices\n");
@@ -1015,9 +1061,17 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig,
       }
       return absl::OkStatus();
     }
+    case kTfLiteBuiltinReverseV2: {
+      RETURN_IF_ERROR(CheckInputsConstsOutputs(op_sig,
+                                               /*required_runtime_inputs=*/1,
+                                               /*required_const_inputs=*/1,
+                                               /*required_outputs=*/1));
+      return CheckAxesAreInt32Const(op_sig, 1);
+    }
 
-    // One argument elemenetwise operations
+    // One argument elementwise operations
     case kTfLiteBuiltinAbs:
+    case kTfLiteBuiltinCeil:
     case kTfLiteBuiltinCos:
     case kTfLiteBuiltinElu:
     case kTfLiteBuiltinExp:
@@ -1036,7 +1090,8 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig,
                                        /*required_const_inputs=*/0,
                                        /*required_outputs=*/1));
 
-    // Two arguments elemenetwise operations
+    // Two arguments elementwise operations
+    case kTfLiteBuiltinAtan2:
     case kTfLiteBuiltinDiv:
     case kTfLiteBuiltinEqual:
     case kTfLiteBuiltinFloorDiv:
@@ -1050,6 +1105,7 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig,
     case kTfLiteBuiltinMinimum:
     case kTfLiteBuiltinNotEqual:
     case kTfLiteBuiltinPow:
+    case kTfLiteBuiltinStablehloRemainder:
     case kTfLiteBuiltinSquaredDifference:
     case kTfLiteBuiltinSub: {
       if (!CheckInputsConstsOutputs(op_sig, /*required_runtime_inputs=*/2,
@@ -1076,6 +1132,57 @@ absl::Status CheckGpuDelegateCompatibility(const OpSignature& op_sig,
       return IsActivationSupported(activation);
     }
 
+    // Stable HLO ops
+    case kTfLiteBuiltinStablehloBroadcastInDim:
+      if (!CheckInputsConstsOutputs(op_sig, /*required_runtime_inputs=*/1,
+                                    /*required_const_inputs=*/1,
+                                    /*required_outputs=*/1)
+               .ok()) {
+        return absl::InvalidArgumentError(
+            "requires one runtime input, one const input, and one output");
+      }
+      if (op_sig.inputs[1].dims.size() != 1) {
+        return absl::InvalidArgumentError("Only support 1D indices");
+      }
+      if (op_sig.inputs[1].type != kTfLiteInt32) {
+        return absl::InvalidArgumentError("Only support int32 indices");
+      }
+      if (op_sig.inputs[0].dims.size() != op_sig.inputs[1].dims[0]) {
+        return absl::InvalidArgumentError(
+            "Require size(indices) = rank(operand)");
+      }
+      return absl::OkStatus();
+    case kTfLiteBuiltinStablehloCbrt:
+      if (op_sig.inputs[0].type != kTfLiteFloat16 &&
+          op_sig.inputs[0].type != kTfLiteFloat32 &&
+          op_sig.inputs[0].type != kTfLiteBFloat16) {
+        return absl::InvalidArgumentError("Only support float inputs");
+      }
+      if (op_sig.inputs[0].type != op_sig.outputs[0].type) {
+        return absl::InvalidArgumentError("Input and output types must match");
+      }
+      return CheckInputsConstsOutputs(op_sig, /*required_runtime_inputs=*/1,
+                                      /*required_const_inputs=*/0,
+                                      /*required_outputs=*/1);
+    case kTfLiteBuiltinStablehloClamp:
+      if ((op_sig.inputs.at(0).type != op_sig.inputs.at(1).type) ||
+          (op_sig.inputs.at(1).type != op_sig.inputs.at(2).type)) {
+        return absl::InvalidArgumentError(
+            "Clamp tensors must all be the same type");
+      }
+      if ((op_sig.inputs.at(0).dims != op_sig.inputs.at(1).dims) &&
+          (NumElements(op_sig.inputs.at(0).dims) != 1)) {
+        return absl::InvalidArgumentError(
+            "Min tensor must be the same shape as the input, or a scalar");
+      }
+      if ((op_sig.inputs.at(2).dims != op_sig.inputs.at(1).dims) &&
+          (NumElements(op_sig.inputs.at(0).dims) != 1)) {
+        return absl::InvalidArgumentError(
+            "Max tensor must be the same shape as the input, or a scalar");
+      }
+      return CheckInputsConstsOutputs(op_sig, /*required_runtime_inputs=*/3,
+                                      /*required_const_inputs=*/0,
+                                      /*required_outputs=*/1);
     case kTfLiteBuiltinCustom:
       return CheckCustomOpsGpuDelegateCompatibility(op_sig);
 

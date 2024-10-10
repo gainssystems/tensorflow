@@ -40,8 +40,10 @@
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/pjrt/pjrt_layout.h"
 #include "xla/python/ifrt/array.h"
+#include "xla/python/ifrt/attribute_map.h"
 #include "xla/python/ifrt/client.h"
 #include "xla/python/ifrt/device.h"
+#include "xla/python/ifrt/device_list.h"
 #include "xla/python/ifrt/dtype.h"
 #include "xla/python/ifrt/executable.h"
 #include "xla/python/ifrt/future.h"
@@ -180,8 +182,6 @@ absl::StatusOr<uint64_t> PrepareAndExecuteLoadedHostCallback(
 LoadedExecutable::LoadedExecutable(
     xla::ifrt::Client* client, std::shared_ptr<RpcHelper> rpc_helper,
     uint64_t handle, std::string name, int num_devices,
-    std::vector<xla::ifrt::LoadedExecutable::LogicalDeviceIds>
-        addressable_device_logical_device_ids,
     std::vector<xla::ifrt::Device*> addressable_devices,
     absl::StatusOr<std::optional<std::string>> fingerprint,
     Future<> ready_future,
@@ -193,8 +193,6 @@ LoadedExecutable::LoadedExecutable(
       handle_(handle),
       name_(std::move(name)),
       num_devices_(num_devices),
-      addressable_device_logical_device_ids_(
-          std::move(addressable_device_logical_device_ids)),
       addressable_devices_(std::move(addressable_devices)),
       fingerprint_(std::move(fingerprint)),
       ready_future_(std::move(ready_future)) {
@@ -357,12 +355,12 @@ std::optional<std::vector<OpSharding>> LoadedExecutable::GetOutputShardings()
   return (*info)->output_shardings;
 }
 
-absl::StatusOr<std::vector<std::unique_ptr<Layout>>>
+absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
 LoadedExecutable::GetParameterLayouts() const {
   TF_ASSIGN_OR_RETURN(auto info, metadata_future_.Await());
   TF_RETURN_IF_ERROR(info->parameter_layouts.status());
 
-  std::vector<std::unique_ptr<Layout>> result;
+  std::vector<std::unique_ptr<xla::PjRtLayout>> result;
   result.reserve(info->parameter_layouts->size());
   for (const xla::Layout& layout : *info->parameter_layouts) {
     result.push_back(std::make_unique<xla::PjRtXlaLayout>(layout));
@@ -370,12 +368,12 @@ LoadedExecutable::GetParameterLayouts() const {
   return result;
 }
 
-absl::StatusOr<std::vector<std::unique_ptr<Layout>>>
+absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
 LoadedExecutable::GetOutputLayouts() const {
   TF_ASSIGN_OR_RETURN(auto info, metadata_future_.Await());
   TF_RETURN_IF_ERROR(info->output_layouts.status());
 
-  std::vector<std::unique_ptr<Layout>> result;
+  std::vector<std::unique_ptr<xla::PjRtLayout>> result;
   result.reserve(info->output_layouts->size());
   for (const xla::Layout& layout : *info->output_layouts) {
     result.push_back(std::make_unique<xla::PjRtXlaLayout>(layout));
@@ -396,16 +394,16 @@ LoadedExecutable::GetHloModules() const {
       "HloModule does not provide stable serialization");
 }
 
-absl::StatusOr<
-    absl::flat_hash_map<std::string, xla::ifrt::Executable::CostAnalysisValue>>
-LoadedExecutable::GetCostAnalysis() const {
+absl::StatusOr<xla::ifrt::AttributeMap> LoadedExecutable::GetCostAnalysis()
+    const {
   return absl::UnimplementedError("Unimplemented");
 }
 
 absl::StatusOr<xla::ifrt::LoadedExecutable::ExecuteResult>
-LoadedExecutable::Execute(absl::Span<tsl::RCReference<xla::ifrt::Array>> args,
-                          const ExecuteOptions& options,
-                          std::optional<xla::ifrt::DeviceList> devices) {
+LoadedExecutable::Execute(
+    absl::Span<tsl::RCReference<xla::ifrt::Array>> args,
+    const ExecuteOptions& options,
+    std::optional<tsl::RCReference<xla::ifrt::DeviceList>> devices) {
   auto req = std::make_unique<LoadedExecutableExecuteRequest>();
   req->set_loaded_executable_handle(handle_);
   for (const auto& arg : args) {
@@ -418,7 +416,7 @@ LoadedExecutable::Execute(absl::Span<tsl::RCReference<xla::ifrt::Array>> args,
   }
   TF_ASSIGN_OR_RETURN(*req->mutable_execute_options(), options.ToProto());
   if (devices.has_value()) {
-    for (const auto* device : *devices) {
+    for (const auto* device : (*devices)->devices()) {
       req->add_device_ids(device->Id().value());
     }
   }
@@ -434,7 +432,12 @@ LoadedExecutable::Execute(absl::Span<tsl::RCReference<xla::ifrt::Array>> args,
 
   // Populate the execution status future. `CheckFuture` deletes the server-side
   // futures after its completion.
-  result.status = rpc_helper_->CheckFuture(response->status_handle());
+  //
+  // Starting version 6, the server populates the status future only if it was
+  // explicitly requested via `options.fill_status`.
+  if (rpc_helper_->version().protocol_version() < 6 || options.fill_status) {
+    result.status = rpc_helper_->CheckFuture(response->status_handle());
+  }
 
   // Create output arrays. The cleanup logic ensures that all handles are
   // properly cleaned up on early return.
@@ -486,11 +489,6 @@ bool LoadedExecutable::IsDeleted() const {
     return false;
   }
   return (*response)->is_deleted();
-}
-
-absl::Span<const LoadedExecutable::LogicalDeviceIds>
-LoadedExecutable::addressable_device_logical_ids() const {
-  return addressable_device_logical_device_ids_;
 }
 
 absl::Span<xla::ifrt::Device* const> LoadedExecutable::addressable_devices()

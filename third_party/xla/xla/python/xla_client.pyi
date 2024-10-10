@@ -59,6 +59,9 @@ _version: int
 mlir_api_version: int
 
 bfloat16: type[numpy.generic]
+# TODO: Uncomment once the minimum ml_dtypes in JAX is >= 0.5.0.
+# float8_e3m4: type[numpy.generic]
+# float8_e4m3: type[numpy.generic]
 float8_e4m3fn: type[numpy.generic]
 float8_e4m3b11fnuz: type[numpy.generic]
 float8_e4m3fnuz: type[numpy.generic]
@@ -70,13 +73,6 @@ _NameValueMapping = Mapping[str, Union[str, int, list[int], float, bool]]
 
 def dtype_to_etype(dtype: numpy.dtype) -> PrimitiveType:
   ...
-
-def execute_with_python_values(executable: LoadedExecutable, arguments: Sequence[Any],
-                               backend: Client) -> Sequence[numpy.ndarray]: ...
-
-def execute_with_python_values_replicated(
-    executable: LoadedExecutable, arguments: Sequence[Sequence[Any]],
-    backend: Client) -> Sequence[Sequence[numpy.ndarray]]: ...
 
 def shape_from_pyval(pyval: Any, layout: Sequence[int] | None = None) -> Any: ...
 
@@ -101,6 +97,7 @@ def make_gpu_client(
     platform_name: str | None = ...,
     allowed_devices: set[int] | None = ...,
     mock: bool | None = ...,
+    mock_gpu_topology: str | None = ...,
 ) -> Client:
   ...
 
@@ -222,12 +219,16 @@ class GatherDimensionNumbers:
   collapsed_slice_dims: list[int]
   start_index_map: list[int]
   index_vector_dim: int
+  operand_batching_dims: list[int]
+  start_indices_batching_dims: list[int]
 
 class ScatterDimensionNumbers:
   update_window_dims: list[int]
   inserted_window_dims: list[int]
   scatter_dims_to_operand_dims: list[int]
   index_vector_dim: int
+  input_batching_dims: list[int]
+  scatter_indices_batching_dims: list[int]
 
 class ReplicaGroup:
   replica_ids: list[int]
@@ -288,3 +289,5 @@ def register_custom_call_handler(
 def custom_call_targets(platform: str) -> dict[str, Any]: ...
 
 def encode_inspect_sharding_callback(handler: Any) -> bytes: ...
+
+register_custom_call_partitioner = _xla.register_custom_call_partitioner

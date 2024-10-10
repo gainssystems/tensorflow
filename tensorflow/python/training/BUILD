@@ -775,14 +775,12 @@ py_strict_library(
 tf_proto_library(
     name = "checkpoint_state",
     srcs = ["checkpoint_state.proto"],
-    cc_api_version = 2,
 )
 
 # copybara:uncomment_begin(google-only)
 # py_proto_library(
 #     name = "checkpoint_state_py_pb2",
 #     testonly = 0,
-#     api_version = 2,
 #     deps = [":checkpoint_state"],
 # )
 # copybara:uncomment_end
@@ -1049,6 +1047,10 @@ py_strict_library(
     name = "server_lib",
     srcs = ["server_lib.py"],
     srcs_version = "PY3",
+    visibility = [
+        "//smartass/brain/ops:__subpackages__",
+        "//tensorflow:internal",
+    ],
     deps = [
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python/client:pywrap_tf_session",

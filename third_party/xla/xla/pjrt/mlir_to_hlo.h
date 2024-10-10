@@ -18,8 +18,8 @@ limitations under the License.
 
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
-#include "xla/client/xla_computation.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "xla/hlo/builder/xla_computation.h"
 
 namespace xla {
 
@@ -28,9 +28,12 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> ParseMlirModuleString(
     absl::string_view mlir_module_str, mlir::MLIRContext& context);
 
 // Converts an CHLO/MHLO module to XLA HLO.
+// TODO(b/345414638): Delete `use_shardy` when we move Shardy as the first pass
+// in the XLA pipeline.
 absl::Status MlirToXlaComputation(mlir::ModuleOp module,
                                   XlaComputation& xla_computation,
-                                  bool use_tuple_args, bool return_tuple);
+                                  bool use_tuple_args, bool return_tuple,
+                                  bool use_shardy);
 
 // Converts an MHLO/CHLO module string to an XLA computation.
 absl::Status ParseMlirModuleStringAndConvertToXlaComputation(
@@ -39,7 +42,8 @@ absl::Status ParseMlirModuleStringAndConvertToXlaComputation(
 
 // Returns a version of StableHLO ~12w old, for forward compatibility with PJRT
 // plugins on a quarterly update cycle.
-std::string GetDefaultStablehloVersion();
+std::string GetDefaultStablehloVersion(
+    std::optional<int64_t> plugin_version = std::nullopt);
 
 // Serialize using MLIR Bytecode Format which does not guarantee forward or
 // backward compatiblity of the dialects used. If passing StableHLO with forward
@@ -49,7 +53,6 @@ std::string GetDefaultStablehloVersion();
 //   For plugin_version < 41, returns `SerializeUsingNativeBytecode`.
 //   For plugin_version >= 41, returns `SerializeUsingVersionedStablehlo`.
 absl::StatusOr<std::string> Serialize(mlir::ModuleOp mlir_module,
-                                      std::optional<int64_t> plugin_version,
                                       absl::string_view target,
                                       bool inplace = false);
 

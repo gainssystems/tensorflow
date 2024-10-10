@@ -62,6 +62,8 @@ extern const char* const kDuccSingleThreadedFftSymbolName;
 extern const char* const kEigenSingleThreadedMatMulF16SymbolName;
 extern const char* const kEigenSingleThreadedMatMulF32SymbolName;
 extern const char* const kEigenSingleThreadedMatMulF64SymbolName;
+extern const char* const kEigenSingleThreadedMatMulF8E4M3FNSymbolName;
+extern const char* const kEigenSingleThreadedMatMulF8E5M2SymbolName;
 extern const char* const kEigenSingleThreadedMatMulC64SymbolName;
 extern const char* const kEigenSingleThreadedMatMulC128SymbolName;
 extern const char* const kEigenSingleThreadedMatMulS32SymbolName;
@@ -102,6 +104,8 @@ extern const char* const kXlaCpuRuntimeSymbolNamePrefix;
 // Returns the infeed manager used by the CPU runtime for the CPU device
 // `device_ordinal`.  Note the device ordinal does not name a CPU
 XfeedManager* GetXfeedManager(int device_ordinal);
+
+int GetDeviceOrdinal(const xla::ExecutableRunOptions* run_options);
 
 }  // namespace runtime
 }  // namespace cpu

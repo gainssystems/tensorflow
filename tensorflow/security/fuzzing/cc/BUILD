@@ -21,6 +21,7 @@ tf_cc_fuzz_test(
     deps = [
         ":fuzz_domains",
         "//tensorflow/core/platform:status",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -77,7 +78,6 @@ tf_cc_fuzz_test(
 tf_proto_library(
     name = "checkpoint_reader_fuzz_input_proto",
     srcs = ["checkpoint_reader_fuzz_input.proto"],
-    cc_api_version = 2,
     make_default_target_header_only = True,
     protodeps = [
         "//tensorflow/core/util:saved_tensor_slice_proto",
@@ -122,6 +122,7 @@ tf_cc_fuzz_test(
     deps = [
         ":fuzz_domains",
         "//tensorflow/core/platform:status",
+        "@com_google_absl//absl/status",
     ],
 )
 
@@ -242,6 +243,6 @@ tf_cc_fuzz_test(
     deps = [
         "@local_tsl//tsl/platform:env",
         "@local_xla//xla:text_literal_reader",
-        "@local_xla//xla/service:hlo_parser",
+        "@local_xla//xla/hlo/parser:hlo_parser",
     ],
 )

@@ -20,15 +20,20 @@ limitations under the License.
 
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
+#include "xla/pjrt/distributed/client.h"
 #include "xla/pjrt/distributed/distributed.h"
+#include "xla/pjrt/distributed/key_value_store_interface.h"
+#include "xla/pjrt/distributed/service.h"
 #include "xla/pjrt/gpu/se_gpu_pjrt_client.h"
 #include "xla/pjrt/pjrt_client.h"
 
 namespace xla {
 
 struct PjRtEnvironment {
-  std::unique_ptr<xla::PjRtClient> client;
+  // Sequence matters here, client should be destroyed before service.
   std::unique_ptr<xla::DistributedRuntimeService> service;
+  std::unique_ptr<xla::PjRtClient> client;
   std::shared_ptr<xla::KeyValueStoreInterface> kv_store;
   std::shared_ptr<xla::DistributedRuntimeClient> distributed_client;
 };

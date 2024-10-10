@@ -38,11 +38,11 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/MathExtras.h"
-#include "mlir/AsmParser/AsmParser.h"  // from @llvm-project
-#include "mlir/IR/AffineExpr.h"  // from @llvm-project
-#include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
-#include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "mlir/AsmParser/AsmParser.h"
+#include "mlir/IR/AffineExpr.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/Support/LLVM.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/service/gpu/model/indexing_analysis.h"
 #include "xla/service/gpu/model/indexing_map.h"
@@ -339,6 +339,48 @@ std::vector<int64_t> GetLoopTripCounts(const IndexingMap& indexing_map) {
     trip_counts.push_back(indexing_map.GetSymbolBound(i).GetLoopTripCount());
   }
   return trip_counts;
+}
+
+absl::Status VerifyExprsAreIdentical(
+    mlir::AffineExpr reference, mlir::AffineExpr other,
+    absl::Span<Interval const> dimension_ranges,
+    absl::Span<Interval const> symbol_ranges) {
+  std::vector<IndexingMap::Variable> dims;
+  dims.reserve(dimension_ranges.size());
+  for (const auto& interval : dimension_ranges) {
+    dims.push_back(IndexingMap::Variable{interval});
+  }
+
+  std::vector<IndexingMap::Variable> symbols;
+  symbols.reserve(symbol_ranges.size());
+  for (const auto& interval : symbol_ranges) {
+    symbols.push_back(IndexingMap::Variable{interval});
+  }
+
+  IndexingMap map(mlir::AffineMap::get(dimension_ranges.size(),
+                                       symbol_ranges.size(), reference),
+                  dims, symbols, {});
+  return EnumerateDomain(
+      map,
+      [&](absl::Span<int64_t const> dims,
+          absl::Span<int64_t const> syms) -> absl::Status {
+        auto reference_value = SafeEvaluateAffineExpr(reference, dims, syms);
+        // If the reference value is undefined, there is no meaningful way to
+        // compare it to the other value.
+        if (!reference_value.has_value()) {
+          return absl::OkStatus();
+        }
+        auto other_value = SafeEvaluateAffineExpr(other, dims, syms);
+        TF_RET_CHECK(other_value.has_value())
+            << "Domain point " << FormatDimsAndSyms(dims, syms)
+            << " triggers undefined behavior in `other`.";
+
+        TF_RET_CHECK(reference_value == other_value)
+            << "Domain point " << FormatDimsAndSyms(dims, syms)
+            << " maps to different values: " << *reference_value << " vs. "
+            << *other_value << ".";
+        return absl::OkStatus();
+      });
 }
 
 }  // namespace gpu

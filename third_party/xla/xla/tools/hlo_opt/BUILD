@@ -75,7 +75,7 @@ cc_library(
         "//xla/service/gpu:gpu_hlo_schedule",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/stream_executor",
-        "//xla/stream_executor/platform",
+        "//xla/stream_executor/platform:initialize",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
@@ -105,7 +105,7 @@ cc_library(
         "//xla/service:hlo_graph_dumper",
         "//xla/service/cpu:cpu_executable",
         "//xla/stream_executor/host:host_platform",
-        "//xla/stream_executor/platform",
+        "//xla/stream_executor/platform:initialize",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@local_tsl//tsl/platform:statusor",
@@ -167,7 +167,7 @@ lit_test_suite(
     ),
     args = if_cuda_is_configured([
         "--param=PTX=PTX",
-        "--param=GPU=a100_80",
+        "--param=GPU=a100_pcie_80",
     ]) + if_rocm_is_configured([
         "--param=PTX=GCN",
         "--param=GPU=mi200",
@@ -175,8 +175,9 @@ lit_test_suite(
     cfg = "//xla:lit.cfg.py",
     data = [":test_utilities"],
     default_tags = tf_cuda_tests_tags(),
+    hermetic_cuda_data_dir = "%S/../../../../cuda_nvcc",
     tags_override = {
-        "gpu_hlo_ptx.hlo": ["no_rocm"],
+        "gpu_hlo_ptx.hlo": ["cuda-only"],
     },
     tools = [
         "//xla/tools:hlo-opt",
@@ -189,7 +190,7 @@ filegroup(
     name = "test_utilities",
     testonly = True,
     data = [
-        "gpu_specs/a100_80.txtpb",
+        "gpu_specs/a100_pcie_80.txtpb",
         "gpu_specs/mi200.txtpb",
         "//xla/tools:hlo-opt",
         "@llvm-project//llvm:FileCheck",

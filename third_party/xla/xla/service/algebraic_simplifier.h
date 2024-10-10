@@ -16,23 +16,31 @@ limitations under the License.
 #ifndef XLA_SERVICE_ALGEBRAIC_SIMPLIFIER_H_
 #define XLA_SERVICE_ALGEBRAIC_SIMPLIFIER_H_
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_module.h"
-#include "xla/service/hlo_pass_interface.h"
+#include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/pass/hlo_pass_interface.h"
+#include "xla/literal.h"
+#include "xla/shape.h"
+#include "xla/shape_util.h"
 #include "xla/util.h"
+#include "xla/xla_data.pb.h"
 
 namespace xla {
 
@@ -102,6 +110,33 @@ class AlgebraicSimplifierOptions {
     return associative_reordering_threshold_;
   }
 
+  void set_use_convert_constant_folding(bool use_convert_constant_folding) {
+    use_convert_constant_folding_ = use_convert_constant_folding;
+  }
+
+  bool use_convert_constant_folding() const {
+    return use_convert_constant_folding_;
+  }
+
+  void set_raise_slice_and_reduce_through_dot(
+      bool raise_slice_and_reduce_through_dot) {
+    raise_slice_and_reduce_through_dot_ = raise_slice_and_reduce_through_dot;
+  }
+
+  bool raise_slice_and_reduce_through_dot() const {
+    return raise_slice_and_reduce_through_dot_;
+  }
+
+  void set_raise_slice_and_reduce_through_dot_threshold(
+      double raise_slice_and_reduce_through_dot_threshold) {
+    raise_slice_and_reduce_through_dot_threshold_ =
+        raise_slice_and_reduce_through_dot_threshold;
+  }
+
+  double raise_slice_and_reduce_through_dot_threshold() const {
+    return raise_slice_and_reduce_through_dot_threshold_;
+  }
+
   // Enable dot simplification on platforms where it is profitable.
   void set_enable_dot_strength_reduction(bool enable_dot_strength_reduction) {
     enable_dot_strength_reduction_ = enable_dot_strength_reduction;
@@ -149,6 +184,17 @@ class AlgebraicSimplifierOptions {
     enable_conv_operand_swap_ = enable_conv_operand_swap;
   }
   bool enable_conv_operand_swap() const { return enable_conv_operand_swap_; }
+
+  // Enable rewrite of convolution + add + multiply -> multiply + convolution +
+  // add.
+  void set_enable_conv_add_multiply_reorder(
+      bool enable_conv_add_multiply_reorder) {
+    enable_conv_add_multiply_reorder_ = enable_conv_add_multiply_reorder;
+  }
+
+  bool enable_conv_add_multiply_reorder() const {
+    return enable_conv_add_multiply_reorder_;
+  }
 
   // Move constant scalar multiply to one operand or output of convolutions with
   // the smallest tensor size, to reduce the number of scalar multiply.
@@ -253,9 +299,23 @@ class AlgebraicSimplifierOptions {
     executing_on_cpu_ = executing_on_cpu;
   }
 
+  // Option to disable conversion of dynamic-slice to slice.
+  void set_disable_dynamic_slice_to_slice_conversion(bool disable) {
+    disable_dynamic_slice_to_slice_conversion_ = disable;
+  }
+  bool disable_dynamic_slice_to_slice_conversion() const {
+    return disable_dynamic_slice_to_slice_conversion_;
+  }
+
+  // Option to set finite math.
+  void set_enable_fast_math(bool enable_fast_math) {
+    enable_fast_math_ = enable_fast_math;
+  }
+  bool enable_fast_math() const { return enable_fast_math_; }
+
  private:
   // Metadata struct can be used to store any metadata information encapsulated
-  // with the AlgebraicSimplierOptions that can be later used in an
+  // with the AlgebraicSimplifierOptions that can be later used in an
   // AlgebraicSimplifier pass. For example,
   // cudnn_batchnorm_forward_training_metadata can be used to store the name of
   // a custom call. If the custom call is
@@ -275,6 +335,7 @@ class AlgebraicSimplifierOptions {
   bool enable_move_dot_param_to_rhs_{false};
   bool enable_conv_simplification_{true};
   bool enable_conv_operand_swap_{true};
+  bool enable_conv_add_multiply_reorder_{false};
   bool enable_scalar_multiply_reduction_{false};
   bool enable_floats_are_real_{false};
   bool enable_window_reduce_to_reduce_replacement_{true};
@@ -285,9 +346,14 @@ class AlgebraicSimplifierOptions {
   int64_t very_small_gather_size_{4};
   bool minmax_propagate_nan_{true};
   bool enable_unconditional_reduce_of_concat_replacement_{true};
-  bool use_associative_reordering_{false};
   bool executing_on_cpu_{false};
+  bool use_associative_reordering_{false};
   double associative_reordering_threshold_{2.0};
+  bool raise_slice_and_reduce_through_dot_{false};
+  double raise_slice_and_reduce_through_dot_threshold_{2.0};
+  bool use_convert_constant_folding_{false};
+  bool disable_dynamic_slice_to_slice_conversion_{false};
+  bool enable_fast_math_{false};
   Metadata metadata_;
 };
 
@@ -358,6 +424,8 @@ class AlgebraicSimplifierVisitor : public DfsHloRewriteVisitor {
   absl::Status HandleComplex(HloInstruction* complex) override;
 
   absl::Status HandleCustomCall(HloInstruction* custom_call) override;
+
+  absl::Status HandleExp(HloInstruction* exp) override;
 
   absl::Status HandleReal(HloInstruction* real) override;
 
@@ -449,6 +517,10 @@ class AlgebraicSimplifierVisitor : public DfsHloRewriteVisitor {
   // non-negative. e.g. abs
   static bool IsNonNegative(const HloInstruction* hlo,
                             const AlgebraicSimplifierOptions& options);
+
+  // Check if the opcode of a given instruction is a non-decreasing function
+  // asymptotically satisfying |f(x)| <= |x|
+  static bool IsNondecreasingSublinear(const HloInstruction* hlo);
 
   // Modify the layout dimensions of result_shape, so that it becomes the
   // re-shaped result of applying bitcast to the original_shape, by using
@@ -610,6 +682,12 @@ class AlgebraicSimplifierVisitor : public DfsHloRewriteVisitor {
   absl::StatusOr<bool> SimplifyConvToDot(HloInstruction* convolution);
   // Tries to use a multiplication in place of the given convolution.
   absl::StatusOr<bool> SimplifyConvToMultiply(HloInstruction* convolution);
+
+  // Tries to reorder mul(add(conv(input, filter), bias), multiplier) ->
+  // add(conv(input, mul(filter, multiplier)), mul(bias, multiplier)). It only
+  // does that when the multiplier is a 1D constant of the size equal to the
+  // convolution output feature dimension.
+  absl::Status TryToReorderConvAddMultiply(HloInstruction* multiply);
 
   // Tries to simplify a slice where the result of the slice is a scalar.
   absl::StatusOr<bool> TrySimplifyScalarSlice(HloInstruction* slice);

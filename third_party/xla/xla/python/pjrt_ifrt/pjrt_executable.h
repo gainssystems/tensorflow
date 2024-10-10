@@ -29,24 +29,28 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "llvm/Support/ExtensibleRTTI.h"
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/IR/BuiltinOps.h"
 #include "xla/hlo/ir/hlo_sharding.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_executable.h"
 #include "xla/python/ifrt/array.h"
+#include "xla/python/ifrt/attribute_map.h"
 #include "xla/python/ifrt/device.h"
+#include "xla/python/ifrt/device_list.h"
 #include "xla/python/ifrt/dtype.h"
 #include "xla/python/ifrt/executable.h"
 #include "xla/python/ifrt/future.h"
 #include "xla/python/ifrt/host_callback.h"
 #include "xla/python/ifrt/shape.h"
 #include "xla/python/ifrt/sharding.h"
+#include "xla/python/pjrt_ifrt/pjrt_attribute_map_util.h"
 #include "xla/python/pjrt_ifrt/pjrt_client.h"
 #include "xla/python/pjrt_ifrt/pjrt_host_callback.h"
 #include "xla/python/pjrt_ifrt/xla_compiler.h"
 #include "xla/tsl/concurrency/ref_count.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
+#include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace ifrt {
@@ -112,14 +116,14 @@ class PjRtExecutable final
     return pjrt_executable_->GetOutputShardings();
   }
 
-  absl::StatusOr<std::vector<std::unique_ptr<Layout>>> GetParameterLayouts()
-      const override {
+  absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
+  GetParameterLayouts() const override {
     DCHECK(this);
     return pjrt_executable_->GetParameterLayouts();
   }
 
-  absl::StatusOr<std::vector<std::unique_ptr<Layout>>> GetOutputLayouts()
-      const override {
+  absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
+  GetOutputLayouts() const override {
     DCHECK(this);
     return pjrt_executable_->GetOutputLayouts();
   }
@@ -148,10 +152,9 @@ class PjRtExecutable final
     return pjrt_executable_->GetHloModules();
   }
 
-  absl::StatusOr<
-      absl::flat_hash_map<std::string, Executable::CostAnalysisValue>>
-  GetCostAnalysis() const override {
-    return pjrt_executable_->GetCostAnalysis();
+  absl::StatusOr<xla::ifrt::AttributeMap> GetCostAnalysis() const override {
+    TF_ASSIGN_OR_RETURN(auto result, pjrt_executable_->GetCostAnalysis());
+    return xla::ifrt::FromPjRtAttributeMap(std::move(result));
   }
 
   absl::StatusOr<std::vector<std::vector<absl::string_view>>>
@@ -239,14 +242,14 @@ class PjRtLoadedExecutable final
     return pjrt_loaded_executable_->GetOutputShardings();
   }
 
-  absl::StatusOr<std::vector<std::unique_ptr<Layout>>> GetParameterLayouts()
-      const override {
+  absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
+  GetParameterLayouts() const override {
     DCHECK(this);
     return pjrt_loaded_executable_->GetParameterLayouts();
   }
 
-  absl::StatusOr<std::vector<std::unique_ptr<Layout>>> GetOutputLayouts()
-      const override {
+  absl::StatusOr<std::vector<std::unique_ptr<xla::PjRtLayout>>>
+  GetOutputLayouts() const override {
     DCHECK(this);
     return pjrt_loaded_executable_->GetOutputLayouts();
   }
@@ -287,7 +290,7 @@ class PjRtLoadedExecutable final
   }
   absl::StatusOr<ExecuteResult> Execute(
       absl::Span<tsl::RCReference<Array>> args, const ExecuteOptions& options,
-      std::optional<DeviceList> devices) override;
+      std::optional<tsl::RCReference<DeviceList>> devices) override;
 
   Future<> Delete() override;
   bool IsDeleted() const override {
@@ -295,20 +298,15 @@ class PjRtLoadedExecutable final
     return pjrt_loaded_executable_->IsDeleted();
   }
 
-  absl::Span<const LoadedExecutable::LogicalDeviceIds>
-  addressable_device_logical_ids() const override {
-    DCHECK(this);
-    return pjrt_loaded_executable_->addressable_device_logical_ids();
-  }
   absl::Span<Device* const> addressable_devices() const override {
     DCHECK(this);
     return addressable_devices_;
   }
 
-  absl::StatusOr<
-      absl::flat_hash_map<std::string, Executable::CostAnalysisValue>>
-  GetCostAnalysis() const override {
-    return pjrt_loaded_executable_->GetCostAnalysis();
+  absl::StatusOr<xla::ifrt::AttributeMap> GetCostAnalysis() const override {
+    TF_ASSIGN_OR_RETURN(auto result,
+                        pjrt_loaded_executable_->GetCostAnalysis());
+    return xla::ifrt::FromPjRtAttributeMap(std::move(result));
   }
 
   static char ID;  // NOLINT
@@ -326,7 +324,8 @@ class PjRtLoadedExecutable final
   PjRtLoadedExecutable(
       PjRtCompatibleClient* client,
       std::shared_ptr<xla::PjRtLoadedExecutable> pjrt_loaded_executable,
-      DeviceList devices, std::vector<Device*> addressable_devices,
+      tsl::RCReference<DeviceList> devices,
+      std::vector<Device*> addressable_devices,
       std::vector<tsl::RCReference<LoadedHostCallback>>
           all_loaded_host_callbacks,
       std::vector<PjRtHostSendAndRecvLoadedHostCallback*>
@@ -338,7 +337,7 @@ class PjRtLoadedExecutable final
   std::shared_ptr<xla::PjRtLoadedExecutable> pjrt_loaded_executable_;
   // Devices that `pjrt_loaded_executable_` runs on. Empty if the executable is
   // portable.
-  DeviceList devices_;
+  tsl::RCReference<DeviceList> devices_;
   std::vector<Device*> addressable_devices_;
   std::shared_ptr<std::vector<tsl::RCReference<LoadedHostCallback>>>
       all_loaded_host_callbacks_;

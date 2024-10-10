@@ -1031,7 +1031,7 @@ py_strict_library(
         "//tensorflow/python/saved_model:save_context",
         "//tensorflow/python/trackable:base",
         "//tensorflow/python/types:core",
-        "//third_party/py/numpy",
+        "//tensorflow/python/util:numpy_compat",
     ],
 )
 
@@ -1058,6 +1058,10 @@ py_strict_library(
     name = "tpu_values",
     srcs = ["tpu_values.py"],
     srcs_version = "PY3",
+    visibility = [
+        "//smartass/brain/ops:__subpackages__",
+        "//tensorflow:internal",
+    ],
     deps = [
         ":packed_distributed_variable",
         ":tpu_replicated_variable",
@@ -1229,6 +1233,10 @@ py_strict_library(
     name = "multi_worker_test_base",
     srcs = ["multi_worker_test_base.py"],
     srcs_version = "PY3",
+    visibility = [
+        "//smartass/brain/ops:__subpackages__",
+        "//tensorflow:internal",
+    ],
     deps = [
         ":distribute_coordinator",
         ":multi_process_runner",
@@ -1802,6 +1810,7 @@ distribute_py_strict_test(
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/eager:test",
+        "//tensorflow/python/framework:config",
         "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:indexed_slices",
@@ -2288,6 +2297,10 @@ py_strict_library(
     tags = [
         "no_oss",  # b/241013307 disable flaky under docker
     ],
+    visibility = [
+        "//smartass/brain/ops:__subpackages__",
+        "//tensorflow:internal",
+    ],
     deps = [
         ":multi_process_lib",
         ":multi_worker_util",
@@ -2519,6 +2532,10 @@ pytype_strict_library(
     name = "parameter_server_strategy_v2",
     srcs = ["parameter_server_strategy_v2.py"],
     srcs_version = "PY3",
+    visibility = [
+        "//smartass/brain/ops:__subpackages__",
+        "//tensorflow:internal",
+    ],
     deps = [
         ":cross_device_ops",
         ":device_util",

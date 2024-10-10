@@ -463,9 +463,9 @@ cc_library(
         "@llvm-project//mlir:TransformUtils",
         "@llvm-project//mlir:Transforms",
         "@local_tsl//tsl/platform:str_util",
-        "@local_tsl//tsl/protobuf:protos_all_cc",
         "@local_xla//xla:xla_data_proto_cc",
         "@local_xla//xla/mlir_hlo",
+        "@local_xla//xla/tsl/protobuf:protos_all_cc",
         "@stablehlo//:chlo_ops",
     ],
     # Alwayslink is required for registering the MLIR passes.
@@ -484,6 +484,7 @@ cc_library(
     compatible_with = get_compatible_with_portable(),
     deps = [
         ":passes",
+        "//tensorflow/compiler/mlir/lite:tensorflow_lite",
         "//tensorflow/compiler/mlir/lite/stablehlo:fold_broadcast_pass",
         "//tensorflow/compiler/mlir/lite/stablehlo:fuse_convolution_pass",
         "//tensorflow/compiler/mlir/lite/stablehlo:legalize_tf_xla_call_module_to_stablehlo_pass",
@@ -491,7 +492,6 @@ cc_library(
         "//tensorflow/compiler/mlir/lite/stablehlo:tf_stablehlo",
         "//tensorflow/compiler/mlir/lite/stablehlo:unfuse_batch_norm_pass",
         "//tensorflow/compiler/mlir/quantization/stablehlo:bridge_passes",
-        "//tensorflow/compiler/mlir/quantization/stablehlo:passes",
         "//tensorflow/compiler/mlir/quantization/stablehlo/cc:pass_pipeline",
         "//tensorflow/compiler/mlir/quantization/tensorflow/cc:run_passes",
         "//tensorflow/compiler/mlir/tensorflow:error_util",
@@ -508,7 +508,6 @@ cc_library(
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
-        "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Transforms",
         "@local_xla//xla/mlir_hlo:all_passes",
     ],
@@ -545,7 +544,6 @@ tf_proto_library(
     srcs = [
         "quantization_options.proto",
     ],
-    cc_api_version = 2,
     make_default_target_header_only = True,
     protodeps = [
         "//tensorflow/core:protos_all",
@@ -557,7 +555,6 @@ tf_proto_library(
 # copybara:uncomment_begin(google-only)
 # py_proto_library(
 #     name = "quantization_options_py_pb2",
-#     api_version = 2,
 #     visibility = ["//visibility:public"],
 #     deps = [":quantization_options_proto"],
 # )
@@ -570,7 +567,6 @@ tf_proto_library(
 tf_proto_library(
     name = "exported_model_proto",
     srcs = ["exported_model.proto"],
-    cc_api_version = 2,
     make_default_target_header_only = True,
     protodeps = [
         "//tensorflow/core:protos_all",
@@ -579,13 +575,13 @@ tf_proto_library(
         ":internal_visibility_allowlist_package",
         # To be visible from `lib_internal_impl`.
         "//tensorflow/core:__pkg__",
+        "//tensorflow/python:__pkg__",
     ],
 )
 
 # copybara:uncomment_begin(google-only)
 # py_proto_library(
 #     name = "exported_model_py_pb2",
-#     api_version = 2,
 #     deps = [":exported_model_proto"],
 # )
 # copybara:uncomment_end

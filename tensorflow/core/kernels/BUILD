@@ -556,7 +556,9 @@ cc_library(
     deps = [
         "//tensorflow/core/platform:tensor_float_32_hdr_lib",
         "//tensorflow/core/util:determinism_for_kernels",
+        "//tensorflow/core/util:env_var",
         "@local_xla//xla/stream_executor:numeric_options",
+        "@local_xla//xla/tsl/util:determinism_for_kernels",
     ] + if_static(["//tensorflow/core/platform:tensor_float_32_utils"]),
 )
 
@@ -699,6 +701,7 @@ cc_library(
         "//tensorflow/core/kernels/batching_util:adaptive_shared_batch_scheduler",
         "//tensorflow/core/kernels/batching_util:batch_resource_base",
         "//tensorflow/core/kernels/batching_util:batch_scheduler_hdrs",
+        "//tensorflow/core/kernels/batching_util:batch_scheduler_utils",
         "//tensorflow/core/kernels/batching_util:bounded_executor",
         "//tensorflow/core/kernels/batching_util:concat_split_util",
         "//tensorflow/core/kernels/batching_util:periodic_function_dynamic",
@@ -787,6 +790,8 @@ cc_library(
         ":variable_ops",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/status",
+        "@local_tsl//tsl/platform:mutex",
     ],
 )
 
@@ -1491,7 +1496,7 @@ tf_cc_test(
         "//tensorflow/core:testlib",
         "//tensorflow/core/platform:status_matchers",
         "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/protobuf:error_codes_proto_impl_cc",
+        "@local_xla//xla/tsl/protobuf:error_codes_proto_impl_cc",
     ],
 )
 
@@ -1643,7 +1648,7 @@ cc_library(
 
 tf_cc_test(
     name = "batch_kernels_test",
-    size = "medium",
+    size = "small",
     srcs = ["batch_kernels_test.cc"],
     features = ["-layering_check"],
     deps = [
@@ -3627,7 +3632,6 @@ cc_library(
     ]) + if_cuda([
         "@local_xla//xla/stream_executor/cuda:cublas_lt_header",
     ]) + if_rocm([
-        "@local_xla//xla/stream_executor/platform:dso_loader",
         "@local_xla//xla/stream_executor/rocm:hipblas_lt_header",
     ]) + if_static(["//tensorflow/core/platform:tensor_float_32_utils"]),
 )
@@ -4315,11 +4319,10 @@ tf_kernel_library(
         "//tensorflow/core/util:determinism_for_kernels",
     ] + if_cuda_or_rocm([
         ":reduction_ops",
-        "@local_xla//xla/stream_executor/gpu:gpu_timer",
+        "@local_xla//xla/stream_executor:event_based_timer",
     ]) + if_cuda([
         "@local_config_cuda//cuda:cub_headers",
         "//tensorflow/core/platform:stream_executor",
-        "@local_xla//xla/stream_executor/cuda:cuda_stream",
     ]) + if_rocm([
         "@local_config_rocm//rocm:rocprim",
     ]),
@@ -4651,6 +4654,8 @@ tf_kernel_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core/util:determinism_for_kernels",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
         "@eigen_archive//:eigen3",
     ],
 )
@@ -4667,7 +4672,7 @@ tf_kernel_library(
         "spacetobatch_functor.h",
         "spacetobatch_functor_gpu.cu.cc",
     ],
-    visibility = [":friends"],
+    visibility = ["//visibility:private"],
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
@@ -4710,7 +4715,7 @@ tf_kernel_library(
         "spacetodepth_op.h",
         "spacetodepth_op_gpu.cu.cc",
     ],
-    visibility = [":friends"],
+    visibility = ["//visibility:private"],
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
@@ -5565,6 +5570,8 @@ tf_cuda_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core:testlib",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -7884,6 +7891,7 @@ tf_kernel_library(
         "//tensorflow/core/util/proto:proto_utils",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/types:span",
+        "@com_google_absl//absl/types:variant",
         "@eigen_archive//:eigen3",
     ],
 )
@@ -8162,6 +8170,7 @@ tf_kernel_library(
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
+        "@com_google_absl//absl/numeric:bits",
         "@eigen_archive//:eigen3",
         "@sobol_data",
     ],

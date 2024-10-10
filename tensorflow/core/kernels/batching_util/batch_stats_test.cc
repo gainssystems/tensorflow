@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "tensorflow/core/kernels/batching_util/batch_stats.h"
 
+#include <tuple>
+
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/time/time.h"
 #include "tensorflow/core/platform/test.h"
@@ -22,12 +25,14 @@ limitations under the License.
 namespace tensorflow::serving {
 namespace {
 
-TEST(BatchStatsTest, GlobalBatchStatsAlwaysReturnsTheSameInstance) {
-  ASSERT_EQ(&GlobalBatchStats(), &GlobalBatchStats());
+using ::testing::UnorderedElementsAre;
+
+TEST(BatchStatsTest, GlobalBatchStatsRegistryAlwaysReturnsTheSameInstance) {
+  ASSERT_EQ(&GlobalBatchStatsRegistry(), &GlobalBatchStatsRegistry());
 }
 
 TEST(BatchStatsTest, BasicOperation) {
-  BatchStats stats;
+  BatchStatsRegistry stats;
   stats.model(/* model_name= */ "m", /* op_name= */ "o")
       .batch_size(1)
       .tpu_cost()
@@ -40,7 +45,7 @@ TEST(BatchStatsTest, BasicOperation) {
 }
 
 TEST(BatchStatsTest, ModelBatchStatsAreUniqueForEachModel) {
-  BatchStats stats;
+  BatchStatsRegistry stats;
   ASSERT_NE(&stats.model(/* model_name= */ "m", /* op_name= */ "o"),
             &stats.model(/* model_name= */ "m", /* op_name= */ "o2"));
 }
@@ -71,6 +76,76 @@ TEST(BatchStatsTest, ProcessedSizeIsCorrect) {
   stats.RegisterProcessedSize(7);
 
   ASSERT_EQ(stats.cumulative_processed_size(), 12);
+}
+
+TEST(BatchStatsTest, ModelOpNamesAreCorrect) {
+  BatchStatsRegistry stats;
+
+  // Register a cost for model "m" and op "o".
+  stats.model(/* model_name= */ "m", /* op_name= */ "o")
+      .batch_size(1)
+      .tpu_cost()
+      .Register(absl::Hours(5));
+
+  // Register a cost for model "m2" and op "o".
+  stats.model(/* model_name= */ "m2", /* op_name= */ "o")
+      .batch_size(1)
+      .tpu_cost()
+      .Register(absl::Hours(7));
+
+  // Register another cost for model "m" and op "o" (but different batch size).
+  stats.model(/* model_name= */ "m", /* op_name= */ "o")
+      .batch_size(2)
+      .tpu_cost()
+      .Register(absl::Hours(4));
+
+  // Register a cost for model "m" and op "o2".
+  stats.model(/* model_name= */ "m", /* op_name= */ "o2")
+      .batch_size(1)
+      .tpu_cost()
+      .Register(absl::Hours(1));
+
+  // Check that the model/op names are correct.
+  ASSERT_THAT(stats.ModelAndOpNames(),
+              UnorderedElementsAre(
+                  std::tuple(/* model_name= */ "m", /* op_name= */ "o"),
+                  std::tuple(/* model_name= */ "m", /* op_name= */ "o2"),
+                  std::tuple(/* model_name= */ "m2", /* op_name= */ "o")));
+}
+
+TEST(BatchStatsTest, BatchSizesAreCorrect) {
+  ModelBatchStats stats;
+
+  // Register costs for batch sizes 1, 2, and 4.
+  stats.batch_size(1).tpu_cost().Register(absl::Hours(5));
+  stats.batch_size(4).tpu_cost().Register(absl::Hours(7));
+  stats.batch_size(1).tpu_cost().Register(absl::Hours(4));
+  stats.batch_size(2).tpu_cost().Register(absl::Hours(1));
+
+  // Check that the batch sizes are correct.
+  ASSERT_THAT(stats.BatchSizes(), UnorderedElementsAre(1, 2, 4));
+}
+
+TEST(BatchStatsTest, BatchTimeoutIsCorrect) {
+  ModelBatchStats stats;
+
+  // Originally the batch timeout is -1 if unassigned.
+  ASSERT_EQ(stats.batch_timeout_micros(), -1);
+
+  // Assign a batch timeout of 100 microseconds.
+  stats.SetBatchTimeoutMicros(100);
+  ASSERT_EQ(stats.batch_timeout_micros(), 100);
+}
+
+TEST(BatchStatsTest, NumBatchThreadsIsCorrect) {
+  ModelBatchStats stats;
+
+  // Originally the number of batch threads is -1 if unassigned.
+  ASSERT_EQ(stats.num_batch_threads(), -1);
+
+  // Assign a number of per-model batch threads.
+  stats.SetNumBatchThreads(16);
+  ASSERT_EQ(stats.num_batch_threads(), 16);
 }
 
 }  // namespace

@@ -31,10 +31,10 @@ limitations under the License.
 #include "absl/container/node_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "xla/tsl/profiler/utils/buffer_pool.h"
+#include "xla/tsl/profiler/utils/lock_free_queue.h"
 #include "tsl/platform/mutex.h"
 #include "tsl/platform/thread_annotations.h"
-#include "tsl/profiler/utils/buffer_pool.h"
-#include "tsl/profiler/utils/lock_free_queue.h"
 
 namespace xla {
 namespace profiler {
@@ -56,7 +56,7 @@ struct MemcpyDetails {
   int8_t dst_mem_kind;
 
   // ID of the hardware channel on which this operation ran.
-  uint32_t channel_id = -1;
+  uint32_t channel_id = static_cast<uint32_t>(-1);
   // CUpti_ChannelType of the channel above.
   int8_t channel_type = 0;  // CUPTI_CHANNEL_TYPE_INVALID
 };
@@ -322,15 +322,23 @@ class CuptiActivityBufferManager {
     cached_buffers_.emplace_back(p, sz);
   }
 
-  void AddCachedActivityEventsTo(CuptiEventCollectorDelegate& receiver,
-                                 size_t max_activity_event_count,
-                                 size_t& dropped_activity_event_count);
+  std::list<ActivityBufferAndSize> PopCachedBuffers() {
+    std::list<ActivityBufferAndSize> result;
+    tsl::mutex_lock lock(buffer_mutex_);
+    std::swap(result, cached_buffers_);
+    return result;
+  }
 
  private:
   tsl::profiler::BufferPool buffer_pool_;
   tsl::mutex buffer_mutex_;
   std::list<ActivityBufferAndSize> cached_buffers_ TF_GUARDED_BY(buffer_mutex_);
 };
+
+void AddActivityBufferListEventsTo(
+    CuptiEventCollectorDelegate& receiver,
+    std::list<CuptiActivityBufferManager::ActivityBufferAndSize>& buffer_list,
+    size_t max_activity_event_count, size_t& dropped_activity_event_count);
 
 class CallbackAnnotationsAndEvents {
  public:

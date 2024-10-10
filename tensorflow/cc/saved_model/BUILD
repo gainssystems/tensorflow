@@ -522,7 +522,7 @@ cc_library(
     name = "fingerprinting",
     hdrs = ["fingerprinting.h"],
     visibility = [
-        "//learning/brain/contrib/hub/server/distro:__subpackages__",
+        "//learning/brain/contrib/hub/server/ingestion:__subpackages__",
         "//learning/brain/contrib/tpu_modeling:__subpackages__",
         "//learning/metadata/artifactoid/cc:__subpackages__",
         "//learning/tfx/pipeline/util:__subpackages__",
@@ -588,12 +588,12 @@ tf_cc_test(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:protobuf",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
     ],
 )
 

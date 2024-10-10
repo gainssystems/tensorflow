@@ -12,6 +12,7 @@ package(
 package_group(
     name = "friends",
     packages = [
+        # copybara:uncomment "//cloud/ai/platform/prediction/...",
         # copybara:uncomment "//learning/brain/experimental/tfrt/native_lowering/...",
         # copybara:uncomment "//learning/brain/tfrt/...",
         # copybara:uncomment "//learning/serving/servables/tfrt/...",
@@ -221,7 +222,6 @@ tf_proto_library(
 # copybara:uncomment_begin(google-only)
 # py_proto_library(
 #     name = "config_proto_py_pb2",
-#     api_version = 2,
 #     visibility = ["//visibility:public"],
 #     deps = [":config_proto"],
 # )
@@ -246,9 +246,9 @@ tf_cc_test(
         ":test_config_proto_cc",
         "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
     ],
 )
 

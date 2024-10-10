@@ -81,7 +81,7 @@ class SparseTensor {
   SparseTensor(const SparseTensor& other)
       : SparseTensor(other.ix_, other.vals_, other.shape_, other.order_) {}
 
-  SparseTensor(SparseTensor&& other)
+  SparseTensor(SparseTensor&& other) noexcept
       : SparseTensor(std::move(other.ix_), std::move(other.vals_),
                      std::move(other.shape_), std::move(other.order_)) {}
 
@@ -94,7 +94,7 @@ class SparseTensor {
     return *this;
   }
 
-  SparseTensor& operator=(SparseTensor&& other) {
+  SparseTensor& operator=(SparseTensor&& other) noexcept {
     ix_ = std::move(other.ix_);
     vals_ = std::move(other.vals_);
     shape_ = std::move(other.shape_);
@@ -447,8 +447,8 @@ inline SparseTensor SparseTensor::Concat(
           << "All SparseTensors' shapes must match except on the concat dim.  "
           << "Concat dim: " << primary_dim
           << ", mismatched shape at dim: " << cdim
-          << ".  Expecting shape like: [" << str_util::Join(final_shape, ",")
-          << "] but saw shape: [" << str_util::Join(st_shape, ",") << "]";
+          << ".  Expecting shape like: [" << absl::StrJoin(final_shape, ",")
+          << "] but saw shape: [" << absl::StrJoin(st_shape, ",") << "]";
     }
 
     // Update dimension of final shape

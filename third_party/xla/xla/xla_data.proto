@@ -66,6 +66,9 @@ enum PrimitiveType {
   // F8E5M2 has 5 exponent bits and 2 mantissa bits, and is similar to the
   // existing IEEE types.
   //
+  // F8E4M3 has 4 exponent bits and 3 mantissa bits, and is similar to the
+  // existing IEEE types.
+  //
   // F8E4M3FN has 4 exponent bits and 3 mantissa bits. The "FN" means only
   // Finite and NaN values are supported. Unlike IEEE types, infinities are not
   // supported.  NaN is represented when the exponent and mantissa bits are all
@@ -77,12 +80,17 @@ enum PrimitiveType {
   // the exponent and mantissa bits are all 0s with a sign bit of 1. All other
   // values are finite.
   //
+  // F8E3M4 has 3 exponent bits and 4 mantissa bits, and is similar to the
+  // existing IEEE types.
+  //
   // Support for these dtypes is under development. They do not yet work
   // properly in most cases.
   // TODO(b/259609697): Fully support FP8.
   F8E5M2 = 19;
+  F8E4M3 = 28;
   F8E4M3FN = 20;
   F8E4M3B11FNUZ = 23;
+  F8E3M4 = 29;
 
   // FP8 dtypes, as described in this paper: https://arxiv.org/abs/2206.02915
   //
@@ -126,10 +134,9 @@ enum PrimitiveType {
   // primitive type will have empty dimensions and tuple_shapes fields.
   TOKEN = 17;
 
-  // Next = 28
+  // Next = 30
 }
 // LINT.ThenChange(
-//   https://www.tensorflow.org/code/tensorflow/compiler/xla/shape_util.cc,
 //   https://www.tensorflow.org/code/tensorflow/compiler/xla/tools/driver.cc
 // )
 
@@ -439,6 +446,9 @@ message OpMetadata {
   // Ids are 1-based to keep 0 value as representation of non-set property.
   int32 stack_frame_id = 15;
 
+  // Instruction name available upon scheduling.
+  string scheduling_name = 16;
+
   reserved 14;
 }
 
@@ -570,12 +580,14 @@ message LiteralProto {
   bytes u16s = 16;
   bytes s16s = 17;
   bytes f8e5m2s = 19;
+  bytes f8e4m3s = 28;
   bytes f8e4m3fns = 20;
   bytes f8e4m3b11fnuzs = 23;
   bytes f8e5m2fnuzs = 24;
   bytes f8e4m3fnuzs = 25;
+  bytes f8e3m4s = 29;
   repeated int64 sparse_indices = 14;
-  // Next = 28
+  // Next = 30
 }
 
 message WindowDimension {
@@ -658,6 +670,13 @@ message GatherDimensionNumbers {
   // The dimension in the start_indices input that contains the starting
   // indices.
   int64 index_vector_dim = 4;
+
+  // This is the batch dimensions in the operand.
+  repeated int64 operand_batching_dims = 5;
+
+  // This is the batch dimensions in the index, and it should be the same size
+  // as operand_batching_dims.
+  repeated int64 start_indices_batching_dims = 6;
 }
 
 // Describes the dimension numbers for a scatter operation.
@@ -672,6 +691,12 @@ message ScatterDimensionNumbers {
 
   repeated int64 scatter_dims_to_operand_dims = 3;
   int64 index_vector_dim = 4;
+
+  // This is the batch dimension in the input.
+  repeated int64 input_batching_dims = 5;
+
+  // This is the batch dimension in the index.
+  repeated int64 scatter_indices_batching_dims = 6;
 }
 
 message ConvolutionDimensionNumbers {
@@ -937,6 +962,38 @@ message ReplicaGroup {
   repeated int64 replica_ids = 1;
 }
 
+// Represents a list of replica groups (a list of list of devices) with
+// reshaping and transposing an iota array (iota tile assignment). Can be used
+// to represent certain common patterns of device lists in a compact, scalable
+// format.
+message IotaReplicaGroupListProto {
+  // Number of replica groups.
+  int64 num_replica_groups = 1;
+
+  // Number of devices per group.
+  int64 num_devices_per_group = 2;
+
+  // The dimensions used to reshape the 1D iota array of device IDs.
+  repeated int64 iota_reshape_dims = 3;
+
+  // The dimension permutations to transposed the iota array reshaped to
+  // iota_reshape_dims. This must have the same size as iota_reshape_dims.
+  repeated int32 iota_transpose_perm = 4;
+}
+
+// Represents a series of devices participating in a collective operation (e.g.,
+// all-reduce and all-to-all). While this directly translates to a list of
+// replica groups, it may be used to represent these lists in a compact form.
+message CollectiveDeviceListProto {
+  // ReplicaGroupV1: List of replica groups. Legacy way of representing device
+  // lists.
+  repeated ReplicaGroup replica_groups = 1;
+
+  // ReplicaGroupV2: Represents a list of replica groups with reshaping and
+  // transposing an iota array.
+  IotaReplicaGroupListProto iota_replica_group_list = 2;
+}
+
 // Describes the source target pair in the collective permute op.
 message SourceTarget {
   int64 source = 1;
@@ -1051,4 +1108,14 @@ message OutputOperandAliasing {
   repeated int64 output_shape_index = 1;
   int64 operand_index = 2;
   repeated int64 operand_shape_index = 3;
+}
+
+message OriginalArrayProto {
+  repeated int64 leaf_shape_index = 1;
+  string instruction_name = 2;
+  repeated int64 shape_index = 3;
+}
+
+message OriginalValueProto {
+  repeated OriginalArrayProto leaves = 1;
 }

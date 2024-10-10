@@ -186,18 +186,21 @@ void AddGraphTraceActivityEvent(CuptiEventCollectorDelegate &collector,
   AnnotationMap::AnnotationInfo info = collector.annotation_map.LookUp(
       graph_trace->deviceId, graph_trace->correlationId);
   collector.receive(CuptiTracerEvent{
-      .type = CuptiTracerEventType::CudaGraph,
-      .source = CuptiTracerEventSource::Activity,
-      .name = absl::StrCat("CudaGraphExec:", graph_trace->graphId),
-      .annotation = info.annotation,
-      .nvtx_range = info.nvtx_range,
-      .start_time_ns = graph_trace->start,
-      .end_time_ns = graph_trace->end,
-      .device_id = graph_trace->deviceId,
-      .correlation_id = graph_trace->correlationId,
-      .context_id = graph_trace->contextId,
-      .stream_id = graph_trace->streamId,
-      .graph_id = graph_trace->graphId,
+      /* .type = */ CuptiTracerEventType::CudaGraph,
+      /* .source = */ CuptiTracerEventSource::Activity,
+      /* .name = */ absl::StrCat("CudaGraphExec:", graph_trace->graphId),
+      /* .annotation = */ info.annotation,
+      /* .nvtx_range = */ info.nvtx_range,
+      /* .start_time_ns = */ graph_trace->start,
+      /* .end_time_ns = */ graph_trace->end,
+      /* .device_id = */ graph_trace->deviceId,
+      /* .correlation_id = */ graph_trace->correlationId,
+      // This is device event where thread_id is meaningless, using its default
+      // value kInvalidThreadId here.
+      /* .thread_id = */ CuptiTracerEvent::kInvalidThreadId,
+      /* .context_id = */ graph_trace->contextId,
+      /* .stream_id = */ graph_trace->streamId,
+      /* .graph_id = */ graph_trace->graphId,
   });
 }
 
@@ -508,6 +511,9 @@ static absl::Status ConvertActivityBuffer(
     } else if (status == CUPTI_ERROR_MAX_LIMIT_REACHED) {
       // Normal, just reach the end of the valid activity events.
       break;
+    } else if (status == CUPTI_ERROR_INVALID_KIND) {
+      VLOG(3) << "CUPTI parse ACTIVITY buffer got CUPTI_ERROR_INVALID_KIND";
+      break;
     } else {
       LOG(WARNING) << "CUPTI parse ACTIVITY buffer error: " << status;
       return absl::Status(StatusCode::kInternal,
@@ -565,16 +571,16 @@ CuptiActivityBufferManager::ActivityBufferAndSize::ActivityBufferAndSize(
              }),
       size(sz) {}
 
-void CuptiActivityBufferManager::AddCachedActivityEventsTo(
+void AddActivityBufferListEventsTo(
     CuptiEventCollectorDelegate &collector,
-    const size_t max_activity_event_count,
-    size_t &dropped_activity_event_count) {
+    std::list<CuptiActivityBufferManager::ActivityBufferAndSize> &buffer_list,
+    size_t max_activity_event_count, size_t &dropped_activity_event_count) {
   dropped_activity_event_count = 0;
   size_t total_activity_event_count = 0;
-  tsl::mutex_lock lock(buffer_mutex_);
-  while (!cached_buffers_.empty()) {
-    ActivityBufferAndSize buffer_and_size(std::move(cached_buffers_.front()));
-    cached_buffers_.pop_front();
+  while (!buffer_list.empty()) {
+    CuptiActivityBufferManager::ActivityBufferAndSize buffer_and_size(
+        std::move(buffer_list.front()));
+    buffer_list.pop_front();
     ConvertActivityBuffer(collector, buffer_and_size.buffer.get(),
                           buffer_and_size.size, max_activity_event_count,
                           total_activity_event_count,

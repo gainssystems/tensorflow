@@ -84,6 +84,7 @@ cc_library(
         ":tf_status_inc_gen",
         "//tensorflow/core/protobuf:error_codes_proto_impl_cc",
         "@com_google_absl//absl/status",
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:AllocationOpInterface",
         "@llvm-project//mlir:BufferizationDialect",
         "@llvm-project//mlir:BytecodeOpInterface",
@@ -93,6 +94,6 @@ cc_library(
         "@llvm-project//mlir:MemRefDialect",
         "@llvm-project//mlir:SideEffectInterfaces",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/protobuf:error_codes_proto_impl_cc",
+        "@local_xla//xla/tsl/protobuf:error_codes_proto_impl_cc",
     ],
 )

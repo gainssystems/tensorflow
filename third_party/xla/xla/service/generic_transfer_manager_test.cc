@@ -36,8 +36,8 @@ limitations under the License.
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/stream_executor/stream_executor_memory_allocator.h"
 #include "xla/tests/literal_test_util.h"
+#include "xla/tsl/lib/core/status_test_util.h"
 #include "xla/types.h"
-#include "tsl/lib/core/status_test_util.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/test.h"
 
@@ -179,6 +179,14 @@ TEST_F(GenericTransferManagerTest, TransferLiteralFromDeviceInt4) {
         literal,
         LiteralUtil::CreateR2<s4>({{s4{1}, s4{-2}}, {s4{-3}, s4{4}}})));
   }
+}
+
+TEST_F(GenericTransferManagerTest, ChooseCompactLayoutForShape) {
+  auto shape = ShapeUtil::MakeShape(S4, {2, 2});
+  TF_ASSERT_OK_AND_ASSIGN(auto compact_shape,
+                          transfer_manager_.ChooseCompactLayoutForShape(shape));
+  EXPECT_TRUE(Shape::Equal().IgnoreLayout()(compact_shape, shape));
+  EXPECT_EQ(compact_shape.layout().element_size_in_bits(), 4);
 }
 
 }  // namespace

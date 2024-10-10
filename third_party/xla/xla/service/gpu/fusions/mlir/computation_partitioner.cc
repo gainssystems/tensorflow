@@ -32,26 +32,30 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"  // from @llvm-project
-#include "mlir/IR/Attributes.h"  // from @llvm-project
-#include "mlir/IR/Builders.h"  // from @llvm-project
-#include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
-#include "mlir/IR/ImplicitLocOpBuilder.h"  // from @llvm-project
-#include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "mlir/IR/Types.h"  // from @llvm-project
-#include "mlir/IR/Value.h"  // from @llvm-project
-#include "mlir/Interfaces/DataLayoutInterfaces.h"  // from @llvm-project
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
+#include "mlir/Interfaces/DataLayoutInterfaces.h"
+#include "mlir/Support/LLVM.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/service/gpu/fusions/fusion_emitter.h"
 #include "xla/service/gpu/fusions/mlir/type_util.h"
 #include "xla/service/gpu/hlo_fusion_analysis.h"
 #include "xla/service/gpu/model/indexing_analysis.h"
 #include "xla/service/gpu/model/indexing_map.h"
 #include "xla/service/llvm_ir/llvm_util.h"
 #include "xla/shape.h"
+#include "xla/shape_util.h"
 
 namespace xla {
 namespace gpu {
@@ -300,12 +304,12 @@ PartitionedComputation::PartitionedComputation(
         absl::StrJoin(roots, "_", [](std::string* out, const auto* root) {
           absl::StrAppend(out, root->name());
         })));
-    subgraphs_.push_back(
-        Subgraph{.name = std::move(name),
-                 .instructions = {instructions.begin(), instructions.end()},
-                 .roots = std::move(roots),
-                 .index_ranges = std::move(ranges),
-                 .root_indexing = std::move(root_indexing)});
+    subgraphs_.push_back(Subgraph{
+        /* .name = */ std::move(name),
+        /* .instructions = */ {instructions.begin(), instructions.end()},
+        /* .roots = */ std::move(roots),
+        /* .index_ranges = */ std::move(ranges),
+        /* .root_indexing = */ std::move(root_indexing)});
   }
 
   for (const auto& subgraph : subgraphs_) {

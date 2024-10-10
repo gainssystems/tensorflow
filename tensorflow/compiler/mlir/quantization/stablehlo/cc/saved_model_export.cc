@@ -39,6 +39,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/quantization/stablehlo/cc/io.h"
 #include "tensorflow/compiler/mlir/quantization/stablehlo/cc/pass_pipeline.h"
 #include "tensorflow/compiler/mlir/quantization/stablehlo/cc/types.h"
+#include "tensorflow/compiler/mlir/quantization/stablehlo/quantization_config.pb.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/cc/convert_asset_args.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/cc/run_passes.h"
 #include "tensorflow/compiler/mlir/quantization/tensorflow/exported_model.pb.h"
@@ -239,7 +240,7 @@ absl::StatusOr<ExportedModel> ConvertMlirModuleToExportedModel(
                                      FunctionDefLibrary()};
   std::unique_ptr<Graph> graph;
   absl::flat_hash_set<Node*> control_ret_nodes{};
-  TF_RETURN_IF_ERROR(tensorflow::tf2xla::v2::ConvertMlirToGraph(
+  TF_RETURN_IF_ERROR(tensorflow::tf2xla::v2::ConvertTfExecutorToGraph(
       module_op, config, &graph, &flib_def, &control_ret_nodes));
 
   GraphDef graph_def{};

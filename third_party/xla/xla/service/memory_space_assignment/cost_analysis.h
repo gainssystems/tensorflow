@@ -89,7 +89,7 @@ class BaseCosts {
   // The bandwidth of copies to/from alternate memory.
   virtual float BytesPerSecond() = 0;
 
-  // The compute cost of instruction. The compute cost assumes 0 memory transer
+  // The compute cost of instruction. The compute cost assumes 0 memory transfer
   // is required.
   virtual float ComputeSeconds(const HloInstruction& instruction) = 0;
 
@@ -115,8 +115,6 @@ class HloCostAnalysisCosts : public BaseCosts {
   float ComputeSeconds(const HloInstruction& instruction) override;
 
  private:
-  HloCostAnalysisCosts() = default;
-
   const HloCostAnalysis& hlo_cost_analysis_;
 };
 

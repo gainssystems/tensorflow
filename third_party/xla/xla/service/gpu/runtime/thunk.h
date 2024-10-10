@@ -32,20 +32,21 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "mlir/IR/Operation.h"  // from @llvm-project
+#include "mlir/IR/Operation.h"
 #include "xla/executable_run_options.h"
 #include "xla/ffi/execution_context.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/global_device_id.h"
 #include "xla/service/gpu/buffer_allocations.h"
+#include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/runtime/nccl_api.h"
 #include "xla/service/gpu/runtime/nccl_clique.h"
 #include "xla/service/gpu/runtime/nccl_clique_key.h"
 #include "xla/service/service_executable_run_options.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/stream_executor/stream_executor.h"
-#include "tsl/lib/gtl/int_type.h"
+#include "xla/tsl/lib/gtl/int_type.h"
 
 namespace xla {
 namespace gpu {
@@ -113,7 +114,7 @@ class Thunk {
   static constexpr auto kDefaultExecutionStreamId = ExecutionStreamId(0);
 
   enum Kind {
-    kAddressComputation,
+    kDynamicSlice,
     kCholesky,
     kConditional,
     kConvolution,
@@ -164,13 +165,9 @@ class Thunk {
     kSendDone,
     kTriangularSolve,
     kWhile,
-    kFusedMHA,
     kWaitForStreams,
     kCuDnn
   };
-
-  // <HLO computation fingerprint, serialized compiled object>.
-  using BinaryMap = absl::flat_hash_map<std::string, std::string>;
 
   // TODO(ezhulenev): This should become a part of StreamExecutor library, but
   // for now we keep it here as a Thunk implementation detail. It's not yet
@@ -327,6 +324,9 @@ class Thunk {
 
     // XLA FFI execution context.
     const ffi::ExecutionContext* ffi_execution_context = nullptr;
+
+    // Total local device count.
+    int local_device_count = 0;
   };
 
   //===--------------------------------------------------------------------===//
@@ -401,6 +401,23 @@ class Thunk {
   };
 
   //===--------------------------------------------------------------------===//
+  // CleanupParams
+  //===--------------------------------------------------------------------===//
+
+  // Parameters passed to Cleanup. Before returning from executable execution,
+  // thunks may need to clean up any resource allocated or registered through
+  // runtime APIs.
+  struct CleanupParams {
+    se::StreamExecutor* executor = nullptr;
+
+    // Parameters for executing collective operations.
+    CollectiveExecuteParams* collective_params = nullptr;
+
+    // Collective cliques acquired based on resource requests.
+    CollectiveCliques* collective_cliques = nullptr;
+  };
+
+  //===--------------------------------------------------------------------===//
 
   // The hlo_instruction argument is meant to be the instruction this thunk was
   // generated from, but Thunk never uses this argument other than to save it
@@ -443,6 +460,14 @@ class Thunk {
   //
   // Precondition: Initialize(initialize_params) has been called.
   virtual absl::Status ExecuteOnStream(const ExecuteParams& params) = 0;
+
+  // Cleans up any resources after thunk execution.
+  //
+  // This may be called multiple times. Its main purpose is to free up
+  // any resources occupied after initialization and execution.
+  virtual absl::Status Cleanup(const CleanupParams& params) {
+    return absl::OkStatus();
+  }
 
   static absl::string_view KindToString(Thunk::Kind kind);
 

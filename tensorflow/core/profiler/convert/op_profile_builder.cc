@@ -27,6 +27,7 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
+#include "xla/tsl/profiler/convert/xla_op_utils.h"
 #include "tensorflow/core/lib/gtl/top_n.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/profiler/convert/op_metrics_db_combiner.h"
@@ -35,7 +36,6 @@ limitations under the License.
 #include "tensorflow/core/profiler/protobuf/op_profile.pb.h"
 #include "tensorflow/core/profiler/utils/math_utils.h"
 #include "tensorflow/core/profiler/utils/op_metrics_db_utils.h"
-#include "tsl/profiler/convert/xla_op_utils.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -52,6 +52,7 @@ void PopulateSymbolNode(const OpMetrics& op_metrics, Node* node) {
   node->set_name(op_metrics.name());
   Node::XLAInstruction& xla = *node->mutable_xla();
   xla.set_expression(op_metrics.long_name());
+  xla.set_fingerprint(op_metrics.fingerprint());
   xla.set_category(op_metrics.category());
   xla.set_provenance(op_metrics.provenance());
   if (op_metrics.has_layout()) {
@@ -89,6 +90,7 @@ void CopySymbolDetailsToDeduplicatedNode(Node* top_child_node,
   Node::XLAInstruction& xla = *deduplicated_node->mutable_xla();
   const Node::XLAInstruction& top_child_node_xla = top_child_node->xla();
   xla.set_expression(top_child_node_xla.expression());
+  xla.set_fingerprint(top_child_node_xla.fingerprint());
   xla.set_category(top_child_node_xla.category());
   if (IsFusion(top_child_node_xla.category())) return;
   xla.set_provenance(top_child_node_xla.provenance());

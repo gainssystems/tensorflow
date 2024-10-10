@@ -34,21 +34,22 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "llvm/Support/Casting.h"
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
-#include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "mlir/IR/OwningOpRef.h"  // from @llvm-project
-#include "third_party/nanobind/include/nanobind/nanobind.h"
-#include "third_party/nanobind/include/nanobind/stl/optional.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/pair.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/shared_ptr.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/string.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/string_view.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/unique_ptr.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/variant.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/vector.h"  // IWYU pragma: keep
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OwningOpRef.h"
+#include "mlir/Pass/PassManager.h"
+#include "nanobind/nanobind.h"
+#include "nanobind/stl/optional.h"  // IWYU pragma: keep
+#include "nanobind/stl/pair.h"  // IWYU pragma: keep
+#include "nanobind/stl/shared_ptr.h"  // IWYU pragma: keep
+#include "nanobind/stl/string.h"  // IWYU pragma: keep
+#include "nanobind/stl/string_view.h"  // IWYU pragma: keep
+#include "nanobind/stl/unique_ptr.h"  // IWYU pragma: keep
+#include "nanobind/stl/variant.h"  // IWYU pragma: keep
+#include "nanobind/stl/vector.h"  // IWYU pragma: keep
 #include "xla/literal.h"
 #include "xla/pjrt/exceptions.h"
 #include "xla/pjrt/mlir_to_hlo.h"
@@ -67,6 +68,7 @@ limitations under the License.
 #include "xla/python/ifrt/hlo/hlo_program.h"
 #include "xla/python/ifrt/host_callback.h"
 #include "xla/python/ifrt/memory.h"
+#include "xla/python/ifrt/program.h"
 #include "xla/python/nb_absl_span.h"  // IWYU pragma: keep
 #include "xla/python/nb_class_ptr.h"
 #include "xla/python/nb_numpy.h"
@@ -86,9 +88,13 @@ limitations under the License.
 #include "xla/python/types.h"
 #include "xla/service/custom_call_target_registry.h"
 #include "xla/service/platform_util.h"  // IWYU pragma: keep
+#include "xla/service/spmd/shardy/constants.h"
+#include "xla/service/spmd/shardy/sdy_round_trip/pipelines.h"
+#include "xla/service/spmd/shardy/utils.h"
 #include "xla/shape.h"
 #include "xla/status_macros.h"
 #include "xla/tsl/concurrency/ref_count.h"
+#include "xla/tsl/framework/mlir/status_scoped_diagnostic_handler.h"
 #include "xla/util.h"
 #include "tsl/platform/casts.h"
 #include "tsl/platform/errors.h"
@@ -96,9 +102,9 @@ limitations under the License.
 #include "tsl/platform/status.h"
 #include "tsl/platform/statusor.h"
 
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM || TENSORFLOW_USE_SYCL
 #include "xla/python/py_client_gpu.h"
-#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM || TENSORFLOW_USE_SYCL
 
 namespace xla {
 
@@ -168,6 +174,15 @@ std::vector<nb_class_ptr<PyDevice>> PyClient::LocalDevices() {
   std::vector<nb_class_ptr<PyDevice>> devices;
   devices.reserve(ifrt_client_->addressable_devices().size());
   for (ifrt::Device* device : ifrt_client_->addressable_devices()) {
+    devices.push_back(GetPyDevice(device));
+  }
+  return devices;
+}
+
+std::vector<nb_class_ptr<PyDevice>> PyClient::GetAllDevices() {
+  std::vector<nb_class_ptr<PyDevice>> devices;
+  devices.reserve(ifrt_client_->GetAllDevices().size());
+  for (ifrt::Device* device : ifrt_client_->GetAllDevices()) {
     devices.push_back(GetPyDevice(device));
   }
   return devices;
@@ -437,6 +452,17 @@ PyClient::CompileIfrtProgram(
   mlir::MLIRContext context;
   TF_ASSIGN_OR_RETURN(mlir::OwningOpRef<mlir::ModuleOp> module,
                       ParseMlirModuleString(mlir_module, context));
+  if (options.executable_build_options.use_shardy_partitioner()) {
+    mlir::PassManager pm(&context);
+    // Since Shardy is inside the middle of the XLA pipeline, after converting
+    // down to HLO, we need to run the Shardy export pipeline to preserve the
+    // SDY ops and sharding attributes for when we come back from HLO to MLIR
+    // when Shardy propagation is run.
+    xla::sdy::addSdyRoundTripExportPipeline(pm);
+    TF_RETURN_IF_ERROR(
+        tsl::StatusScopedDiagnosticHandler(&context).consumeStatus(
+            pm.run(*module)));
+  }
   return CompileIfrtProgram(
       client, std::make_unique<xla::ifrt::HloProgram>(module.get()),
       MakeIfrtCompileOptions(std::move(options), std::move(host_callbacks)));
@@ -627,12 +653,6 @@ PyClient::GetEmitPythonCallbackDescriptor(nb::callable callable,
 XLA_CPU_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("xla_python_cpu_callback",
                                              &XlaPythonCpuCallback);
 
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
-    "xla_python_gpu_callback", &XlaPythonGpuCallback,
-    absl::AsciiStrToUpper(PlatformUtil::CanonicalPlatformName("gpu").value()));
-#endif
-
 /* static */ int PyClient::tp_traverse(PyObject* self, visitproc visit,
                                        void* arg) {
   PyClient* c = nb::inst_ptr<PyClient>(self);
@@ -677,6 +697,9 @@ PyType_Slot PyClient::slots_[] = {
       .def("local_device_count", &PyClient::addressable_device_count)
       .def("devices", &PyClient::Devices)
       .def("local_devices", &PyClient::LocalDevices)
+      // TODO(hyeontaek): Remove this method once we have a unified API for
+      // enumerating devices with different criteria.
+      .def("_get_all_devices", &PyClient::GetAllDevices)
       .def("device_from_local_hardware_id",
            xla::ValueOrThrowWrapper(&PyClient::DeviceFromLocalHardwareId))
       .def("live_executables", &PyClient::LiveExecutables)

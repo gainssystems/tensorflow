@@ -15,7 +15,7 @@ limitations under the License.
 
 #include "xla/service/hlo_runner_interface.h"
 
-#include "xla/service/hlo_parser.h"
+#include "xla/hlo/parser/hlo_parser.h"
 
 namespace xla {
 
@@ -57,14 +57,6 @@ HloRunnerInterface::ReadModuleFromBinaryProtoFile(
   HloProto proto;
   TF_RETURN_IF_ERROR(
       tsl::ReadBinaryProto(tsl::Env::Default(), filename, &proto));
-  return HloProtoToModule(proto, debug_options);
-}
-
-/*static*/ absl::StatusOr<std::unique_ptr<HloModule>>
-HloRunnerInterface::ReadModuleFromTextProtoFile(
-    const std::string& filename, const DebugOptions& debug_options) {
-  HloProto proto;
-  TF_RETURN_IF_ERROR(tsl::ReadTextProto(tsl::Env::Default(), filename, &proto));
   return HloProtoToModule(proto, debug_options);
 }
 

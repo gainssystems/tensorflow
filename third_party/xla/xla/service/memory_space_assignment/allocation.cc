@@ -37,17 +37,22 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/layout.h"
+#include "xla/layout_util.h"
 #include "xla/service/heap_simulator/allocation_block.h"
 #include "xla/service/heap_simulator/heap_simulator.h"
 #include "xla/service/hlo_value.h"
+#include "xla/service/memory_space_assignment/memory_space_assignment.pb.h"
 #include "xla/service/memory_space_assignment/slice.h"
 #include "xla/service/time_utils.h"
 #include "xla/service/tuple_util.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/util.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/casts.h"
 #include "tsl/platform/errors.h"
+#include "tsl/platform/statusor.h"
 
 namespace xla::memory_space_assignment {
 namespace {
@@ -298,7 +303,8 @@ CopyAllocation::CopyAllocation(
     std::optional<HeapSimulator::Chunk> chunk,
     int64_t copy_start_schedule_after_time,
     int64_t copy_done_schedule_before_time, int64_t end_time,
-    std::optional<int64_t> cross_program_prefetch_index)
+    std::optional<int64_t> cross_program_prefetch_index,
+    HloInstruction* sync_instruction)
     : Allocation(
           /*defining_position=*/{nullptr, {}}, memory_space, chunk,
           // Allocation uses an inclusive start time
@@ -307,7 +313,8 @@ CopyAllocation::CopyAllocation(
           /*is_scoped_allocation=*/false, cross_program_prefetch_index),
       prev_allocation_(prev_allocation),
       copy_start_schedule_after_(copy_start_schedule_after_time),
-      copy_done_schedule_before_(copy_done_schedule_before_time) {}
+      copy_done_schedule_before_(copy_done_schedule_before_time),
+      sync_instruction_(sync_instruction) {}
 
 int64_t CopyAllocation::earliest_available_time() const {
   return copy_done_schedule_before_;
@@ -318,11 +325,23 @@ absl::Status CopyAllocation::Process() {
   Shape shape = defining_position().shape();
   HloInstruction* producing_instruction = AddGetTupleElements();
   HloComputation* computation = producing_instruction->parent();
-  copy_start_ = computation->AddInstruction(HloInstruction::CreateCopyStart(
-      ShapeUtil::MakeTupleShape({shape, shape, ShapeUtil::MakeShape(U32, {})}),
-      producing_instruction, cross_program_prefetch_index()));
-  copy_done_ = computation->AddInstruction(
-      HloInstruction::CreateUnary(shape, HloOpcode::kCopyDone, copy_start_));
+  if (sync_instruction_ != nullptr &&
+      sync_instruction_->opcode() != HloOpcode::kCopy) {
+    TF_ASSIGN_OR_RETURN(copy_done_,
+                        computation->CreateAsyncInstructions(
+                            sync_instruction_, {ShapeUtil::MakeShape(S32, {})},
+                            HloInstruction::kMainExecutionThread, false));
+    copy_start_ = copy_done_->mutable_operand(0);
+    TF_RETURN_IF_ERROR(
+        copy_start_->ReplaceOperandWith(0, producing_instruction));
+  } else {
+    copy_start_ = computation->AddInstruction(HloInstruction::CreateCopyStart(
+        ShapeUtil::MakeTupleShape(
+            {shape, shape, ShapeUtil::MakeShape(U32, {})}),
+        producing_instruction, cross_program_prefetch_index()));
+    copy_done_ = computation->AddInstruction(
+        HloInstruction::CreateUnary(shape, HloOpcode::kCopyDone, copy_start_));
+  }
   VLOG(4) << "Created " << copy_start_->name()
           << " for copy allocation: " << ToString();
 
@@ -354,8 +373,9 @@ std::string CopyAllocation::ToString() const {
                       ", start_time:", start_time(), ", end_time:", end_time(),
                       ", copy_start_after_time: ", copy_start_schedule_after(),
                       ", copy_done_before_time: ", copy_done_schedule_before(),
-                      ", uses: ", UsesToString(uses()), ", from ",
-                      prev_allocation_.ToString());
+                      ", uses: ", UsesToString(uses()), ", sync_instruction: ",
+                      sync_instruction_ ? sync_instruction_->name() : "none",
+                      ", from ", prev_allocation_.ToString());
 }
 
 HloPosition CopyAllocation::defining_position() const {
@@ -848,6 +868,107 @@ void MirroredAllocation::MarkNeeded(
 bool MirroredAllocation::operator==(const Allocation& other) const {
   const MirroredAllocation* casted_other =
       dynamic_cast<const MirroredAllocation*>(&other);
+  return casted_other != nullptr && (*this) == (*casted_other);
+}
+
+WindowPrefetchedAllocation::WindowPrefetchedAllocation(
+    Allocation& prev_allocation, HloUse use, const HeapSimulator::Chunk& chunk,
+    int64_t prefetch_start_schedule_after_time,
+    int64_t prefetch_done_schedule_before_time, const Options& options)
+    : Allocation(
+          {nullptr, {}}, MemorySpace::kAlternate, chunk,
+          ExclusiveToInclusiveStartTime(prefetch_start_schedule_after_time),
+          InclusiveToExclusiveEndTime(prefetch_done_schedule_before_time),
+          /*is_scoped_allocation=*/false,
+          /*cross_program_prefetch_index=*/std::nullopt),
+      options_(options),
+      prev_allocation_(prev_allocation),
+      use_(use),
+      prefetch_start_schedule_after_(prefetch_start_schedule_after_time),
+      prefetch_done_schedule_before_(prefetch_done_schedule_before_time),
+      bytes_(chunk.size) {}
+
+HloPosition WindowPrefetchedAllocation::defining_position() const {
+  HloPosition defining_position = original_defining_position();
+  if (defining_position.instruction == nullptr) {
+    return prev_allocation_.defining_position();
+  }
+  return defining_position;
+}
+
+int64_t WindowPrefetchedAllocation::earliest_available_time() const {
+  return prefetch_done_schedule_before_;
+}
+
+absl::Status WindowPrefetchedAllocation::InsertWindowPrefetchInstruction(
+    HloInstruction* producing_instruction, HloInstruction* use_instruction,
+    HloComputation* computation) {
+  // Derive the shape for window buffer.
+  Shape shape = ShapeUtil::MakeShape(U8, {options_.bytes});
+  Layout layout = LayoutUtil::MakeLayout({0});
+  layout.set_memory_space(options_.alternate_memory_space);
+  *shape.mutable_layout() = layout;
+
+  // Insert async WindowPrefetch instructions as operands to the fusion.
+  HloInstruction* prefetch =
+      computation->AddInstruction(HloInstruction::CreateCustomCall(
+          shape, {producing_instruction}, "WindowPrefetch"));
+  TF_ASSIGN_OR_RETURN(prefetch_instruction_,
+                      computation->CreateAsyncInstructions(prefetch, {}));
+  use_instruction->AppendOperand(prefetch_instruction_);
+
+  return absl::OkStatus();
+}
+
+absl::Status WindowPrefetchedAllocation::Process() {
+  HloInstruction* producing_instruction = AddGetTupleElements();
+  HloComputation* computation = producing_instruction->parent();
+  HloInstruction* use_instruction = use_.instruction;
+  CHECK_EQ(use_instruction->opcode(), HloOpcode::kFusion);
+
+  TF_RETURN_IF_ERROR(InsertWindowPrefetchInstruction(
+      producing_instruction, use_instruction, computation));
+
+  // Notify the backend that an operand has been appended as a window prefetch
+  // buffer.
+  int64_t use_operand = use_instruction->operand_count() - 1;
+  options_.notify_operand_appended_fn(use_instruction, options_.uid,
+                                      use_operand);
+
+  // Set the original defining position to the window prefetch instruction.
+  set_original_defining_position(HloPosition{prefetch_instruction_, {}});
+  AddUse(HloUse{use_instruction, use_operand});
+  return absl::OkStatus();
+}
+
+void WindowPrefetchedAllocation::MarkIfNeeded(
+    absl::flat_hash_set<const Allocation*>& needed_allocations) const {
+  MarkNeeded(needed_allocations);
+}
+
+void WindowPrefetchedAllocation::MarkNeeded(
+    absl::flat_hash_set<const Allocation*>& needed_allocations) const {
+  needed_allocations.insert(this);
+  prev_allocation_.MarkNeeded(needed_allocations);
+}
+
+std::string WindowPrefetchedAllocation::ToString() const {
+  return absl::StrCat("WindowPrefetched Allocation");
+}
+
+bool WindowPrefetchedAllocation::operator==(
+    const WindowPrefetchedAllocation& other) const {
+  return this->base_is_equal(static_cast<const Allocation&>(other)) &&
+         prefetch_done_schedule_before() ==
+             other.prefetch_done_schedule_before() &&
+         prefetch_start_schedule_after() ==
+             other.prefetch_start_schedule_after() &&
+         prefetch() == other.prefetch() && bytes_ == other.bytes_;
+}
+
+bool WindowPrefetchedAllocation::operator==(const Allocation& other) const {
+  const WindowPrefetchedAllocation* casted_other =
+      dynamic_cast<const WindowPrefetchedAllocation*>(&other);
   return casted_other != nullptr && (*this) == (*casted_other);
 }
 

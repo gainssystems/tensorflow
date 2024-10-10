@@ -23,7 +23,7 @@ limitations under the License.
 
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/dfs_hlo_visitor_with_default.h"
-#include "xla/service/hlo_pass_interface.h"
+#include "xla/hlo/pass/hlo_pass_interface.h"
 
 namespace xla {
 
@@ -96,6 +96,11 @@ struct HloVerifierOpts {
     return std::move(*this);
   }
 
+  HloVerifierOpts&& VerifyInstructionNameUnchanged() {
+    verify_instruction_name_unchanged = true;
+    return std::move(*this);
+  }
+
   bool IsLayoutSensitive() const { return layout_sensitive; }
 
   bool AllowMixedPrecision() const { return allow_mixed_precision; }
@@ -138,6 +143,14 @@ struct HloVerifierOpts {
 
   // Whether unbounded dynamic sizes should be allowed for shapes.
   bool allow_unbounded_dynamism = false;
+
+  // Check whether instruction has been renamed.
+  // Should enforce no function renames unless the name instruction has been
+  // cloned (".clone" suffix) or rematted (".remat");
+  bool verify_instruction_name_unchanged = false;
+
+  // Check if channel instructions all have unique channel ids.
+  bool verify_unique_channel_ids = true;
 
   HloPredicate instruction_can_change_layout;
 

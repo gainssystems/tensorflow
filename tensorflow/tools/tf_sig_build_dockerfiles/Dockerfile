@@ -1,5 +1,5 @@
 ################################################################################
-FROM ubuntu:22.04@sha256:19478ce7fc2ffbce89df29fea5725a8d12e57de52eb9ea570890dc5852aac1ac as builder
+FROM ubuntu:22.04@sha256:58b87898e82351c6cf9cf5b9f3c20257bb9e2dcf33af051e12ce532d7f94e3fe as builder
 ################################################################################
 
 # Install devtoolset build dependencies
@@ -29,7 +29,7 @@ COPY devel.packages.txt /devel.packages.txt
 RUN /setup.sources.sh && /setup.packages.sh /devel.packages.txt && /setup.cuda.sh
 
 # Make sure clang is on the path
-RUN ln -s /usr/lib/llvm-17/bin/clang /usr/bin/clang
+RUN ln -s /usr/lib/llvm-18/bin/clang /usr/bin/clang
 
 # Install various tools.
 # - bats: bash unit testing framework

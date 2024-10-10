@@ -54,9 +54,9 @@ limitations under the License.
 namespace tensorflow {
 namespace ifrt_serving {
 namespace {
-const tsl::thread::ThreadPool& GetThreadPool() {
+tsl::thread::ThreadPool& GetThreadPool() {
   constexpr int kMaxParallelism = 16;
-  static auto* const thread_pool =
+  static auto* thread_pool =
       new tsl::thread::ThreadPool(tsl::Env::Default(), tsl::ThreadOptions(),
                                   "IfrtSharding", kMaxParallelism);
   return *thread_pool;
@@ -87,8 +87,8 @@ CreateIfrtServingExecutable(mlir::MLIRContext& context, int64_t program_id) {
   std::unique_ptr<tfrt::ConcurrentWorkQueue> work_queue =
       tfrt::CreateMultiThreadedWorkQueue(
           /*num_threads=*/4, /*num_blocking_threads=*/4);
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<tensorflow::StaticDeviceMgr> device_mgr,
-                      CreateTfStaticDeviceMgr());
+  TF_ASSIGN_OR_RETURN(std::unique_ptr<tensorflow::DynamicDeviceMgr> device_mgr,
+                      CreateTfDynamicDeviceMgr());
 
   return IfrtServingExecutable::Create(
       program_id, "test", "main", std::move(mlir_module), client,
@@ -96,7 +96,8 @@ CreateIfrtServingExecutable(mlir::MLIRContext& context, int64_t program_id) {
       &ifrt_restore_tensor_registry, work_queue.get(), device_mgr.get(),
       tensorflow::IdentityShapeRepresentationFn(),
       /*ifrt_serving_core_selector=*/nullptr,
-      /*compilation_environment_proto=*/nullptr);
+      /*compilation_environment_proto=*/nullptr,
+      /*persistent_compilation_cache=*/nullptr);
 }
 
 TEST(IfrtExecutableRegistry, Basic) {

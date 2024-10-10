@@ -24,7 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/base/dynamic_annotations.h"
-#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
+#include "unsupported/Eigen/CXX11/Tensor"
 #include "dnnl.hpp"
 #include "xla/executable_run_options.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
@@ -228,6 +228,13 @@ std::unique_ptr<matmul::primitive_desc> CreateMatMulPrimDesc(
                  [](const Shape& shape) { return ShapeToMemDesc(shape); });
   return CreateMatMulPrimDesc(engine(engine::kind::cpu, 0), input_md,
                               weights_md, output_md, fused_mds, matmul_config);
+}
+
+template <>
+typename PrimitiveTrait<kOnednnMatmulConfig>::pointer_type
+GetKernelConfig<kOnednnMatmulConfig>(
+    absl::StatusOr<BackendConfig>* backend_config) {
+  return (*backend_config)->mutable_onednn_matmul_config();
 }
 
 template <>

@@ -57,9 +57,8 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "@local_tsl//tsl/platform:platform_port",
         "@local_tsl//tsl/platform:retrying_utils",
-        "@local_tsl//tsl/protobuf:error_codes_proto_impl_cc",
+        "@local_xla//xla/tsl/protobuf:error_codes_proto_impl_cc",
     ],
 )
 
@@ -103,7 +102,7 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@local_tsl//tsl/platform:errors",
-        "@local_tsl//tsl/protobuf:protos_all_cc",
+        "@local_xla//xla/tsl/protobuf:protos_all_cc",
     ],
 )
 
@@ -120,10 +119,10 @@ tf_cc_test(
         "//tensorflow/core/data/service:dispatcher_client",
         "//tensorflow/core/data/service:test_cluster",
         "//tensorflow/core/data/service:test_util",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:status_matchers",
-        "@local_tsl//tsl/protobuf:protos_all_cc",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
+        "@local_xla//xla/tsl/protobuf:protos_all_cc",
     ] + tf_grpc_cc_dependencies() + tf_protos_profiler_service(),
 )
 

@@ -1,4 +1,4 @@
-/* Copyright 2015 The OpenXLA Authors.
+/* Copyright 2024 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,25 +13,49 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-// Defines the GpuStream type - the CUDA-specific implementation of the generic
-// StreamExecutor Stream interface.
-
 #ifndef XLA_STREAM_EXECUTOR_CUDA_CUDA_STREAM_H_
 #define XLA_STREAM_EXECUTOR_CUDA_CUDA_STREAM_H_
 
-#include "xla/stream_executor/blas.h"
+#include <memory>
+#include <optional>
+#include <utility>
+#include <variant>
+
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "third_party/gpus/cuda/include/cuda.h"
+#include "xla/stream_executor/event.h"
+#include "xla/stream_executor/gpu/gpu_event.h"
+#include "xla/stream_executor/gpu/gpu_executor.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
+#include "xla/stream_executor/platform.h"
+#include "xla/stream_executor/stream.h"
 
 namespace stream_executor {
-namespace cuda {
+namespace gpu {
 
-using CUDAStream = gpu::GpuStream;
+class CudaStream : public GpuStream {
+ public:
+  absl::Status WaitFor(Stream* other) override;
+  absl::Status RecordEvent(Event* event) override;
+  absl::Status WaitFor(Event* event) override;
 
-inline CUDAStream* AsCUDAStream(Stream* stream) {
-  return gpu::AsGpuStream(stream);
-}
+  static absl::StatusOr<std::unique_ptr<CudaStream>> Create(
+      GpuExecutor* executor, std::unique_ptr<GpuEvent> completed_event,
+      std::optional<std::variant<StreamPriority, int>> priority);
 
-}  // namespace cuda
+ private:
+  CudaStream(GpuExecutor* executor, std::unique_ptr<GpuEvent> completed_event,
+             std::optional<std::variant<StreamPriority, int>> priority,
+             CUstream stream_handle)
+      : GpuStream(executor, std::move(completed_event), priority,
+                  stream_handle),
+        executor_(executor) {}
+
+  GpuExecutor* executor_;
+};
+}  // namespace gpu
+
 }  // namespace stream_executor
 
 #endif  // XLA_STREAM_EXECUTOR_CUDA_CUDA_STREAM_H_

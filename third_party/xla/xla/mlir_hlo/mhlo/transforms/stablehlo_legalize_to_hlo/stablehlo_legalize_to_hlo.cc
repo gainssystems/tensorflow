@@ -88,6 +88,13 @@ Attribute convertAttr(Attribute stablehloAttr) {
           mlir::dyn_cast<stablehlo::CustomCallApiVersionAttr>(stablehloAttr)) {
     RETURN_CONVERTED_ENUM_ATTR(CustomCallApiVersion);
   }
+  if (auto attr = mlir::dyn_cast<stablehlo::DotAlgorithmAttr>(stablehloAttr)) {
+    return mhlo::DotAlgorithmAttr::get(
+        attr.getContext(), attr.getLhsPrecisionType(),
+        attr.getRhsPrecisionType(), attr.getAccumulationType(),
+        attr.getLhsComponentCount(), attr.getRhsComponentCount(),
+        attr.getNumPrimitiveOperations(), attr.getAllowImpreciseAccumulation());
+  }
   if (auto attr =
           mlir::dyn_cast<stablehlo::DotDimensionNumbersAttr>(stablehloAttr)) {
     return mhlo::DotDimensionNumbersAttr::get(
@@ -231,7 +238,7 @@ LogicalResult rewriteCustomCallAsMhloOp(stablehlo::CustomCallOp stablehloOp,
            name == "mhlo.version";
   };
   if (!llvm::all_of(stablehloOp->getAttrs(), isSupportedAttrName) ||
-      !stablehloOp.getBackendConfig().empty()) {
+      !stablehloOp.hasEmptyBackendConfig()) {
     return failure();
   }
 
@@ -294,8 +301,8 @@ LogicalResult fixupMhloBackendConfig(stablehlo::CustomCallOp stablehloOp,
                                      mhlo::CustomCallOp hloOp) {
   auto stablehloBackendConfig = stablehloOp->getAttr("mhlo.backend_config");
   if (stablehloBackendConfig) {
-    if (auto oldHloBackendConfig =
-            mlir::dyn_cast_or_null<StringAttr>(hloOp.getBackendConfigAttr())) {
+    if (auto oldHloBackendConfig = mlir::dyn_cast<StringAttr>(
+            stablehloOp.getBackendConfigOrDefault())) {
       if (!oldHloBackendConfig.empty()) return failure();
     } else {
       return failure();

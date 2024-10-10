@@ -33,6 +33,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/log_severity.h"
 #include "absl/base/macros.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/container/inlined_vector.h"
@@ -44,11 +45,11 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
-#include "Eigen/Core"  // from @eigen_archive
+#include "Eigen/Core"
 #include "xla/status_macros.h"
+#include "xla/tsl/lib/math/math_util.h"
 #include "xla/types.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/lib/math/math_util.h"
 #include "tsl/platform/bfloat16.h"
 #include "tsl/platform/casts.h"
 #include "tsl/platform/errors.h"  // IWYU pragma: keep
@@ -419,6 +420,9 @@ std::string VectorString(const std::initializer_list<T>& c) {
 std::string RoundTripFpToString(tsl::float8_e5m2 value);
 
 // Returns a string which can losslessly round trip to a float8 E4M3.
+std::string RoundTripFpToString(tsl::float8_e4m3 value);
+
+// Returns a string which can losslessly round trip to a float8 E4M3FN.
 std::string RoundTripFpToString(tsl::float8_e4m3fn value);
 
 // Returns a string which can losslessly round trip to a float8 E4M3B11.
@@ -429,6 +433,9 @@ std::string RoundTripFpToString(tsl::float8_e5m2fnuz value);
 
 // Returns a string which can losslessly round trip to a float8 E4M3FNUZ.
 std::string RoundTripFpToString(tsl::float8_e4m3fnuz value);
+
+// Returns a string which can losslessly round trip to a float8 E3M4.
+std::string RoundTripFpToString(tsl::float8_e3m4 value);
 
 // Returns a string which can losslessly round trip to a bfloat.
 std::string RoundTripFpToString(tsl::bfloat16 value);
@@ -511,7 +518,24 @@ std::string HumanReadableNumTranscendentalOps(double trops, double nanoseconds);
 
 // Split the text into multiple lines and log each line with the given
 // severity, filename, and line number.
-void LogLines(int sev, absl::string_view text, const char* fname, int lineno);
+void LogLines(absl::LogSeverity sev, absl::string_view text, const char* fname,
+              int lineno);
+inline void LogLinesINFO(absl::string_view text, const char* fname,
+                         int lineno) {
+  return LogLines(absl::LogSeverity::kInfo, text, fname, lineno);
+}
+inline void LogLinesWARNING(absl::string_view text, const char* fname,
+                            int lineno) {
+  return LogLines(absl::LogSeverity::kWarning, text, fname, lineno);
+}
+inline void LogLinesERROR(absl::string_view text, const char* fname,
+                          int lineno) {
+  return LogLines(absl::LogSeverity::kError, text, fname, lineno);
+}
+inline void LogLinesFATAL(absl::string_view text, const char* fname,
+                          int lineno) {
+  return LogLines(absl::LogSeverity::kFatal, text, fname, lineno);
+}
 
 // Returns a mask with "width" number of least significant bits set.
 template <typename T>
@@ -876,6 +900,22 @@ inline void UnpackIntN(int bits_per_element, absl::Span<const char> input,
   }
 }
 
+// Returns a container with `sorted_ids_to_remove` elements removed.
+template <typename T>
+static T RemoveElements(absl::Span<int64_t const> sorted_ids_to_remove,
+                        const T& container) {
+  T result;
+  auto id_to_remove = sorted_ids_to_remove.begin();
+  for (size_t i = 0; i < container.size(); ++i) {
+    if (id_to_remove != sorted_ids_to_remove.end() && *id_to_remove == i) {
+      ++id_to_remove;
+      continue;
+    }
+    result.push_back(container[i]);
+  }
+  return result;
+}
+
 class HloInstruction;
 class HloModule;
 
@@ -893,19 +933,13 @@ using Vector3 = std::array<int64_t, 3>;
 
 // Note that STRING is evaluated regardless of whether it will be logged.
 #define XLA_LOG_LINES(SEV, STRING) \
-  ::xla::LogLines(SEV, STRING, __FILE__, __LINE__)
+  ::xla::LogLines##SEV(STRING, __FILE__, __LINE__)
 
 // Like LOG_LINES, but only logs if VLOG is enabled for the given level.
-#define XLA_VLOG_LINES(LEVEL, STRING)                          \
-  do {                                                         \
-    if (VLOG_IS_ON(LEVEL)) XLA_LOG_LINES(::tsl::INFO, STRING); \
-  } while (false);
-
-// Utility macro that performs the equivalent of what one would expect
-// LOG_LINES(FATAL, X) to do but can be used at the end of a function that
-// returns a value without getting a compiler warning that no value is returned.
-#define XLA_FATAL_LOG(X)          \
-  XLA_LOG_LINES(::tsl::ERROR, X); \
-  LOG(FATAL) << "Aborting in " << __FUNCTION__ << " due to previous errors.";
+// STRING is evaluated only if it will be logged.
+#define XLA_VLOG_LINES(LEVEL, STRING)                   \
+  do {                                                  \
+    if (VLOG_IS_ON(LEVEL)) XLA_LOG_LINES(INFO, STRING); \
+  } while (false)
 
 #endif  // XLA_UTIL_H_

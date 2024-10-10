@@ -26,6 +26,7 @@ limitations under the License.
 #include "xla/literal_util.h"
 #include "xla/service/cpu/benchmarks/hlo_benchmark_runner.h"
 #include "xla/shape_util.h"
+#include "xla/xla_data.pb.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/test_benchmark.h"
 
@@ -280,11 +281,10 @@ BENCHMARK(BM_DynamicUpdateSliceFusionF32)
 
 BENCHMARK(BM_ChainOfAddF32)
     ->MeasureProcessCPUTime()
-    ->Arg(8)
-    ->Arg(16)
     ->Arg(64)
     ->Arg(128)
     ->Arg(256)
-    ->Arg(512);
+    ->Arg(512)
+    ->Arg(1024);
 
 }  // namespace xla::cpu

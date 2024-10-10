@@ -28,6 +28,7 @@
 #include "xla/pjrt/pjrt_layout.h"
 #include "xla/python/ifrt/array.h"
 #include "xla/python/ifrt/device.h"
+#include "xla/python/ifrt/device_list.h"
 #include "xla/python/ifrt/dtype.h"
 #include "xla/python/ifrt/executable.h"
 #include "xla/python/ifrt/future.h"
@@ -136,8 +137,8 @@ TEST_F(LoadedExecutableTest, Metadata) {
   MockClient client;
   LoadedExecutable executable(
       &client, rpc_helper_, /*handle=*/1234, /*name=*/"foo",
-      /*num_devices=*/2, /*addressable_device_logical_device_ids=*/{},
-      /*addressable_devices=*/{}, /*fingerprint=*/"fingerprint",
+      /*num_devices=*/2, /*addressable_devices=*/{},
+      /*fingerprint=*/"fingerprint",
       /*ready_future=*/Future<>(absl::OkStatus()),
       /*loaded_host_callbacks=*/{}, /*loaded_host_callback_handles=*/{});
 
@@ -185,8 +186,8 @@ TEST_F(LoadedExecutableTest, Execute) {
 
   LoadedExecutable executable(
       &client, rpc_helper_, /*handle=*/1234, /*name=*/"foo",
-      /*num_devices=*/2, /*addressable_device_logical_device_ids=*/{},
-      /*addressable_devices=*/{}, /*fingerprint=*/"fingerprint",
+      /*num_devices=*/2, /*addressable_devices=*/{},
+      /*fingerprint=*/"fingerprint",
       /*ready_future=*/Future<>(absl::OkStatus()),
       /*loaded_host_callbacks=*/{}, /*loaded_host_callback_handles=*/{});
 
@@ -240,7 +241,7 @@ TEST_F(LoadedExecutableTest, Execute) {
                                                           })pb")))))
       .WillOnce(MockClientSessionReturnResponse(response));
 
-  DeviceList devices({&device});
+  tsl::RCReference<DeviceList> devices = BasicDeviceList::Create({&device});
 
   std::vector<tsl::RCReference<xla::ifrt::Array>> args;
   for (const uint64_t handle : {1000, 1001}) {
@@ -277,8 +278,8 @@ TEST_F(LoadedExecutableTest, Delete) {
   MockClient client;
   LoadedExecutable executable(
       &client, rpc_helper_, /*handle=*/1234, /*name=*/"foo",
-      /*num_devices=*/2, /*addressable_device_logical_device_ids=*/{},
-      /*addressable_devices=*/{}, /*fingerprint=*/"fingerprint",
+      /*num_devices=*/2, /*addressable_devices=*/{},
+      /*fingerprint=*/"fingerprint",
       /*ready_future=*/Future<>(absl::OkStatus()),
       /*loaded_host_callbacks=*/{}, /*loaded_host_callback_handles=*/{});
 

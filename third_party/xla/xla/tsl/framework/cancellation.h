@@ -19,7 +19,7 @@ limitations under the License.
 #include <atomic>
 #include <functional>
 
-#include "tsl/lib/gtl/flatmap.h"
+#include "xla/tsl/lib/gtl/flatmap.h"
 #include "tsl/platform/hash.h"
 #include "tsl/platform/mutex.h"
 #include "tsl/platform/notification.h"
@@ -135,7 +135,7 @@ class CancellationManager {
   // callback, which will be displayed on the log.
   bool RegisterCallbackWithErrorLogging(CancellationToken token,
                                         CancelCallback callback,
-                                        tsl::StringPiece callback_name);
+                                        absl::string_view callback_name);
 
   // Deregister the callback that, when registered, was associated
   // with the given cancellation token. Returns true iff the callback

@@ -29,38 +29,43 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "mlir/Bytecode/BytecodeWriter.h"  // from @llvm-project
-#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"  // from @llvm-project
-#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
-#include "mlir/Dialect/Func/Extensions/AllExtensions.h"  // from @llvm-project
-#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/MLProgram/IR/MLProgram.h"  // from @llvm-project
-#include "mlir/IR/Attributes.h"  // from @llvm-project
-#include "mlir/IR/Builders.h"  // from @llvm-project
-#include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
-#include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
-#include "mlir/IR/MLIRContext.h"  // from @llvm-project
-#include "mlir/IR/OwningOpRef.h"  // from @llvm-project
-#include "mlir/IR/Visitors.h"  // from @llvm-project
-#include "mlir/Parser/Parser.h"  // from @llvm-project
-#include "mlir/Pass/PassManager.h"  // from @llvm-project
-#include "mlir/Support/LLVM.h"  // from @llvm-project
-#include "mlir/Support/LogicalResult.h"  // from @llvm-project
-#include "mlir/Transforms/Passes.h"  // from @llvm-project
-#include "stablehlo/dialect/ChloOps.h"  // from @stablehlo
-#include "stablehlo/dialect/Register.h"  // from @stablehlo
-#include "stablehlo/dialect/Serialization.h"  // from @stablehlo
-#include "stablehlo/dialect/StablehloOps.h"  // from @stablehlo
-#include "stablehlo/transforms/Passes.h"  // from @stablehlo
+#include "mlir/Bytecode/BytecodeWriter.h"
+#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/Extensions/AllExtensions.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MLProgram/IR/MLProgram.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/Location.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OwningOpRef.h"
+#include "mlir/IR/Visitors.h"
+#include "mlir/Parser/Parser.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
+#include "mlir/Transforms/Passes.h"
+#include "shardy/dialect/sdy/ir/register.h"
+#include "stablehlo/dialect/ChloOps.h"
+#include "stablehlo/dialect/Register.h"
+#include "stablehlo/dialect/Serialization.h"
+#include "stablehlo/dialect/StablehloOps.h"
+#include "stablehlo/dialect/Version.h"
+#include "stablehlo/transforms/Passes.h"
 #include "xla/debug_options_flags.h"
+#include "xla/hlo/translate/mhlo_to_hlo/mlir_hlo_to_hlo.h"
 #include "xla/mlir/utils/error_util.h"
 #include "xla/mlir_hlo/mhlo/IR/register.h"
 #include "xla/mlir_hlo/mhlo/transforms/passes.h"
-#include "xla/service/spmd/shardonnay/constants.h"
-#include "xla/service/spmd/shardonnay/utils.h"
-#include "xla/translate/mhlo_to_hlo/mlir_hlo_to_hlo.h"
+#include "xla/service/spmd/shardy/constants.h"
+#include "xla/service/spmd/shardy/utils.h"
 #include "xla/util.h"
 #include "tsl/platform/statusor.h"
 
@@ -68,7 +73,8 @@ namespace xla {
 
 absl::Status MlirToXlaComputation(mlir::ModuleOp module,
                                   XlaComputation& xla_computation,
-                                  bool use_tuple_args, bool return_tuple) {
+                                  bool use_tuple_args, bool return_tuple,
+                                  bool use_shardy) {
   mlir::MLIRContext* context = module->getContext();
   mlir::BaseScopedDiagnosticHandler diagnostic_handler(context);
   {
@@ -93,11 +99,11 @@ absl::Status MlirToXlaComputation(mlir::ModuleOp module,
     }
   }
 
-  // TODO(b/345414638): Delete when we move Shardonnay as the first pass in the
+  // TODO(b/345414638): Delete when we move Shardy as the first pass in the
   // XLA pipeline.
-  if (use_tuple_args && GetDebugOptionsFromFlags().xla_use_shardonnay()) {
-    // Shardonnay can't handle tuple args when round-tripping. So delay using
-    // tuples until after Shardonnay is run.
+  if (use_tuple_args && use_shardy) {
+    // Shardy can't handle tuple args when round-tripping. So delay using
+    // tuples until after Shardy is run.
     sdy::addFrontendAttribute(module, sdy::kUseTupleArgs,
                               mlir::StringAttr::get(context, "t"));
     use_tuple_args = false;
@@ -124,6 +130,7 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> ParseMlirModuleString(
   registry.insert<mlir::shape::ShapeDialect>();
   mlir::func::registerAllExtensions(registry);
   mlir::mhlo::registerAllMhloDialects(registry);
+  mlir::sdy::registerAllDialects(registry);
   mlir::stablehlo::registerAllDialects(registry);
   context.appendDialectRegistry(registry);
 
@@ -131,27 +138,18 @@ absl::StatusOr<mlir::OwningOpRef<mlir::ModuleOp>> ParseMlirModuleString(
   mlir::OwningOpRef<mlir::ModuleOp> module =
       mlir::parseSourceString<mlir::ModuleOp>(
           llvm::StringRef(mlir_module_str.data(), mlir_module_str.size()),
-          // IR may be invalid because some fields may be using DenseElements
-          // instead of DenseArray. We rectify that below and verify after.
-          mlir::ParserConfig{&context, /*verifyAfterParse=*/false});
+          mlir::ParserConfig{&context});
   if (!module) {
+    mlir::emitError(mlir::UnknownLoc::get(&context))
+        << "Failed to parse using StableHLO v"
+        << mlir::vhlo::Version::getCurrentVersion() << ", "
+        << "this could indicate forward incompatibility, >12w old "
+           "unsupported plugin, or a portable artifact that needs to be "
+           "further downgraded.";
     return diagnostic_handler.ConsumeStatus();
   }
 
-  // In
-  // https://github.com/google/jax/commit/184e3a88004680dbf34328b05c5fc0d869cc4a93,
-  // fields on some ops were changed to use Dense{Bool,I64}ArrayAttr instead of
-  // I64DenseElementsAttr (DenseIntElementsAttr). Some clients still expect
-  // dense elements, not dense arrays, so when serializing we always convert the
-  // arrays to elements. The elements need to be converted back to arrays when
-  // deserializing.
-  // TODO: b/320507168 - Remove the conversion code, and verifyAfterParse.
   TF_RETURN_IF_ERROR(UpgradeVersionedStablehlo(*module));
-  if (failed(module->verifyInvariants())) {
-    VLOG(1) << "MLIR verification failed.";
-    module->dump();
-    return diagnostic_handler.ConsumeStatus();
-  }
   return std::move(module);
 }
 
@@ -162,7 +160,7 @@ absl::Status ParseMlirModuleStringAndConvertToXlaComputation(
   TF_ASSIGN_OR_RETURN(mlir::OwningOpRef<mlir::ModuleOp> module,
                       xla::ParseMlirModuleString(mlir_module_str, context));
   return xla::MlirToXlaComputation(*module, xla_computation, use_tuple_args,
-                                   return_tuple);
+                                   return_tuple, /*use_shardy=*/false);
 }
 
 absl::StatusOr<std::string> SerializeUsingNativeBytecode(
@@ -198,6 +196,11 @@ absl::StatusOr<std::string> SerializeUsingVersionedStablehlo(
   mlir::PassManager pm(context);
   pm.addNestedPass<mlir::func::FuncOp>(
       mlir::mhlo::createChloLegalizeToHighLevelMhloPass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      mlir::stablehlo::createChloLegalizeToStablehloPass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      mlir::stablehlo::createStablehloCompatibilityExpanderPass(
+          {std::string(target)}));
   pm.addNestedPass<mlir::func::FuncOp>(
       mlir::stablehlo::createChloLegalizeToStablehloPass());
   pm.addNestedPass<mlir::func::FuncOp>(
@@ -241,15 +244,21 @@ absl::Status UpgradeVersionedStablehlo(mlir::ModuleOp mlir_module) {
   return absl::OkStatus();
 }
 
-std::string GetDefaultStablehloVersion() {
+std::string GetDefaultStablehloVersion(std::optional<int64_t> plugin_version) {
+  // TODO: (b/370803410) Use WEEK_12 in PJRT, some plugins were not up to date,
+  // so temporarily using 1.0.0 to allow them time for a new release.
+  // PJRT v54 released Jun 10, so most plugins should use WEEK_12 by default.
+  if (plugin_version.has_value() && plugin_version.value() < 54) {
+    return "0.19.0";
+  }
+
   // This version must be >=12w old.
-  // See https://github.com/openxla/stablehlo/tags
-  //   0.19.0 - Mar 13, 2024
-  return "0.19.0";
+  return mlir::vhlo::Version::fromCompatibilityRequirement(
+             mlir::vhlo::Version::CompatibilityRequirement::WEEK_12)
+      .toString();
 }
 
 absl::StatusOr<std::string> Serialize(mlir::ModuleOp module,
-                                      std::optional<int64_t> /*plugin_version*/,
                                       absl::string_view target, bool inplace) {
   // Current PJRT users expect 12 weeks forward compat, VHLO provides this
   // compat.
@@ -259,7 +268,6 @@ absl::StatusOr<std::string> Serialize(mlir::ModuleOp module,
     if (!llvm::isa<mlir::ModuleOp>(op) &&
         !llvm::isa<mlir::stablehlo::StablehloDialect, mlir::func::FuncDialect,
                    mlir::chlo::ChloDialect>(op->getDialect())) {
-      std::cout << op->getDialect()->getNamespace().str() << "\n";
       all_stablehlo = false;
       return mlir::WalkResult::interrupt();
     }

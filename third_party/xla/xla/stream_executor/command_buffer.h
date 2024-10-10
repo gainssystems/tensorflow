@@ -28,7 +28,7 @@ limitations under the License.
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/launch_dim.h"
-#include "tsl/lib/gtl/int_type.h"
+#include "xla/tsl/lib/gtl/int_type.h"
 #include "tsl/platform/errors.h"
 
 namespace stream_executor {
@@ -325,6 +325,11 @@ class CommandBuffer {
   absl::Status While(DeviceMemory<bool> pred,
                      ExecutionScopeBuilder cond_builder, Builder body_builder) {
     return While(kDefaulExecutionScope, pred, cond_builder, body_builder);
+  }
+
+  // Submits the command buffer for execution.
+  virtual absl::Status Submit(Stream* stream) {
+    return absl::UnimplementedError("Not implemented for this command buffer.");
   }
 
   //--------------------------------------------------------------------------//

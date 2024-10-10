@@ -37,6 +37,7 @@ visibility = [
     "//tensorflow_minigo:__subpackages__",
     "//research/graph/fairness/inproc_fair_reg:__subpackages__",
     "//third_party/py/scenic:__subpackages__",
+    "//smartass/brain/ops:__subpackages__",
 ]
 
 package(
@@ -139,9 +140,8 @@ tf_gen_op_strict_wrapper_private_py(
     name = "array_ops_gen",
     visibility = [
         "//learning/brain/python/ops:__pkg__",
+        "//smartass/brain/ops:__subpackages__",
         "//tensorflow/compiler/mlir/tfr:__pkg__",
-        "//tensorflow/compiler/mlir/tfr/examples/customization:__pkg__",
-        "//tensorflow/compiler/mlir/tfr/examples/pad:__pkg__",
         "//tensorflow/compiler/mlir/tfr/python/experimental:__pkg__",
         "//tensorflow/compiler/tests:__pkg__",
         "//tensorflow/contrib/opt:__pkg__",
@@ -447,7 +447,6 @@ tf_gen_op_strict_wrapper_private_py(
         "//learning/brain/google/python/ops:__pkg__",
         "//learning/brain/python/ops:__pkg__",
         "//tensorflow/compiler/mlir/tfr:__pkg__",
-        "//tensorflow/compiler/mlir/tfr/examples/mnist:__pkg__",
         "//tensorflow/compiler/tests:__pkg__",
         "//tensorflow/contrib/opt:__pkg__",
         "//tensorflow/dtensor:dtensor-internal",
@@ -461,7 +460,6 @@ tf_gen_op_strict_wrapper_private_py(
     name = "nn_ops_gen",
     visibility = [
         "//learning/brain/python/ops:__pkg__",
-        "//tensorflow/compiler/mlir/tfr/examples/mnist:__pkg__",
         "//tensorflow/compiler/tests:__pkg__",
         "//tensorflow/contrib/opt:__pkg__",
         "//tensorflow/dtensor:dtensor-internal",
@@ -530,6 +528,7 @@ tf_gen_op_strict_wrapper_private_py(
 tf_gen_op_strict_wrapper_private_py(
     name = "resource_variable_ops_gen",
     visibility = [
+        "//smartass/brain/configure:__subpackages__",
         "//tensorflow/compiler/mlir/tfr:__pkg__",
         "//tensorflow/compiler/tf2xla:internal",
         "//tensorflow/dtensor:dtensor-internal",
@@ -2521,6 +2520,7 @@ py_strict_library(
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:dispatch",
         "//tensorflow/python/util:nest",
+        "//tensorflow/python/util:numpy_compat",
         "//tensorflow/python/util:tf_export",
         "//tensorflow/python/util:tf_inspect",
         "//tensorflow/python/util:variable_utils",
@@ -2552,8 +2552,8 @@ py_strict_library(
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:tensor",
         "//tensorflow/python/util:compat",
+        "//tensorflow/python/util:numpy_compat",
         "//tensorflow/python/util:tf_export",
-        "//third_party/py/numpy",
     ],
 )
 
@@ -3156,11 +3156,11 @@ py_strict_library(
         "//tensorflow/python/types:core",
         "//tensorflow/python/util:compat",
         "//tensorflow/python/util:deprecation",
+        "//tensorflow/python/util:numpy_compat",
         "//tensorflow/python/util:object_identity",
         "//tensorflow/python/util:tf_export",
         "//tensorflow/python/util:tf_should_use",
         "//tensorflow/python/util:traceback_utils",
-        "//third_party/py/numpy",
         "@absl_py//absl/logging",
         "@pypi_typing_extensions//:pkg",
     ],
@@ -3220,6 +3220,7 @@ py_strict_library(
         "//tensorflow/python/framework:tensor",
         "//tensorflow/python/platform:tf_logging",
         "//tensorflow/python/util:deprecation",
+        "//tensorflow/python/util:numpy_compat",
         "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
     ],
@@ -3239,6 +3240,7 @@ py_strict_library(
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:tensor",
         "//tensorflow/python/platform:tf_logging",
+        "//tensorflow/python/util:numpy_compat",
         "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
     ],
@@ -3673,6 +3675,7 @@ cuda_py_strict_test(
         "//tensorflow/python/platform:test",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
+        "@pypi_packaging//:pkg",
     ],
 )
 
@@ -4461,6 +4464,7 @@ py_strict_library(
         "//tensorflow/python/framework:tensor_util",
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:dispatch",
+        "//tensorflow/python/util:numpy_compat",
         "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
     ],

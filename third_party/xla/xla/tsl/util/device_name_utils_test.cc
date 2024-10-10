@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <vector>
 
-#include "tsl/lib/core/status_test_util.h"
+#include "xla/tsl/lib/core/status_test_util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/strcat.h"
 #include "tsl/platform/test.h"
@@ -298,7 +298,7 @@ TEST(DeviceNameUtilsTest, Basic) {
   }
 }
 
-static bool IsCSHelper(StringPiece pattern, StringPiece actual) {
+static bool IsCSHelper(absl::string_view pattern, absl::string_view actual) {
   DeviceNameUtils::ParsedName p, a;
   EXPECT_TRUE(DeviceNameUtils::ParseFullName(pattern, &p));
   EXPECT_TRUE(DeviceNameUtils::ParseFullName(actual, &a));
@@ -323,7 +323,7 @@ TEST(DeviceNameUtilsTest, IsCompleteSpecification) {
       IsCSHelper("/gpu:*", "/job:worker/replica:1/task:2/device:GPU:3"));
 }
 
-static bool IsSpecHelper(StringPiece pattern, StringPiece actual) {
+static bool IsSpecHelper(absl::string_view pattern, absl::string_view actual) {
   DeviceNameUtils::ParsedName p, a;
   EXPECT_TRUE(DeviceNameUtils::ParseFullName(pattern, &p));
   EXPECT_TRUE(DeviceNameUtils::ParseFullName(actual, &a));

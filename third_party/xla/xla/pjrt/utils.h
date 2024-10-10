@@ -20,15 +20,17 @@ limitations under the License.
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/IR/BuiltinOps.h"
 #include "xla/client/executable_build_options.h"
-#include "xla/client/xla_computation.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/pjrt/layout_mode.h"
 #include "xla/service/computation_placer.h"
@@ -67,18 +69,6 @@ absl::StatusOr<std::vector<MemorySpaceColor>> GetArgMemoryKinds(
 // the "mhlo.memory_kind" frontend attribute, and if not present, assumes 0.
 absl::StatusOr<std::vector<MemorySpaceColor>> GetOutputMemoryKinds(
     mlir::ModuleOp module);
-
-// Populates the frontend attributes "arg_layout_mode" and "out_layout_mode" in
-// xla_computation based on `module`. This function must be called before the
-// LayoutMode getters below work correctly on `computation`.
-absl::Status AddLayoutModesToFrontendAttrs(mlir::ModuleOp module,
-                                           XlaComputation& xla_computation);
-
-// Populates the frontend attributes "arg_memory_kinds" and "out_memory_kinds"
-// in xla_computation based on `module`. This function must be called before the
-// LayoutMode getters below work correctly on `computation`.
-absl::Status AddMemoryKindsToFrontendAttrs(mlir::ModuleOp module,
-                                           XlaComputation& xla_computation);
 
 // Returns the LayoutMode for each argument of the computations. Checks for the
 // "arg_layout_mode" frontend attribute, and if not present, assumes
@@ -165,6 +155,10 @@ absl::Status TestBufferDonationClashes(
     void* opaque_key,
     absl::flat_hash_map<const void*, std::pair<bool, int>>& donation_clashes,
     bool is_donated, int arg_idx, int replica, int partition);
+
+// Capitalizes the first character in a string, which can be empty.
+std::string MakeAsciiTitlecase(absl::string_view s);
+void MakeAsciiTitlecase(std::string* s);
 
 }  // namespace xla
 

@@ -24,9 +24,9 @@ limitations under the License.
 #include <vector>
 
 #include "absl/types/span.h"
-#include "unsupported/Eigen/SpecialFunctions"  // from @eigen_archive
+#include "unsupported/Eigen/SpecialFunctions"
 #include "xla/client/local_client.h"
-#include "xla/client/xla_builder.h"
+#include "xla/hlo/builder/xla_builder.h"
 #include "xla/literal.h"
 #include "xla/primitive_util.h"
 #include "xla/shape_util.h"

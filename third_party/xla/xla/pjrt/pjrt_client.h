@@ -31,14 +31,17 @@ limitations under the License.
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/synchronization/notification.h"
 #include "absl/types/span.h"
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
-#include "xla/client/xla_computation.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/layout.h"
 #include "xla/literal.h"
 #include "xla/pjrt/pjrt_common.h"
@@ -55,6 +58,7 @@ limitations under the License.
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
+#include "tsl/platform/statusor.h"
 
 // API notes:
 // PjRt stands for "Pretty much Just another RunTime".
@@ -490,6 +494,11 @@ struct PjRtPluginAttributes {
 // will eventually be able to make progress.
 class PjRtClient {
  public:
+  struct ShapeSpec {
+    PrimitiveType element_type;
+    DimensionVector dims;
+  };
+
   PjRtClient() = default;
   explicit PjRtClient(std::unique_ptr<PjRtHostMemoryForDeviceManager>
                           host_memory_for_device_manager)
@@ -666,12 +675,18 @@ class PjRtClient {
   // buffers' definition events will automatically become ready, unblocking
   // downstream consumers of the buffers.
   //
-  // A single call to CreateBuffersForAsyncHostToDevice creates a "batch" of
-  // buffers that share a single definition event, which may amortize some
-  // performance overheads, but means that none of the buffers are available to
-  // downstream consumers until all the transfers have completed. Multiple calls
-  // to CreateBuffersForAsyncHostToDevice should be made if it is desirable for
-  // buffers to become available as soon as transfers into them complete.
+  // Depending on the backend's implementation, a single call to
+  // CreateBuffersForAsyncHostToDevice may either:
+  //   - Create a "batch" of buffers that share a single definition event, which
+  //   may amortize some performance overheads, but means that none of the
+  //   buffers are available to downstream consumers until all the transfers
+  //   have completed, in which case multiple calls to
+  //   CreateBuffersForAsyncHostToDevice should be made if it is desirable for
+  //   buffers to become available as soon as transfers into them complete.
+  //
+  //   - Create a "batch" of buffers with multiple underlying definitions
+  //   events, and individual buffers become available to downstream consumers
+  //   as soon as transfers into them complete.
 
   // Helper class to all clients to asynchronously transfer data into buffers
   // that are created uninitialized, see comments immediately above.
@@ -742,6 +757,32 @@ class PjRtClient {
     using TransferMetadata = absl::flat_hash_map<std::string, std::string>;
     virtual void AddTransferMetadata(const TransferMetadata& metadata) = 0;
   };
+
+  // Returns a manager for async transfers into a set of buffers with on-host
+  // shapes defined by 'shape_specs' and optional `device_layouts`. The
+  // `device_layout` is used when non-compact layouts are preferred.
+  virtual absl::StatusOr<std::unique_ptr<AsyncHostToDeviceTransferManager>>
+  CreateBuffersForAsyncHostToDevice(
+      absl::Span<const ShapeSpec> shape_specs,
+      std::optional<absl::Span<const Layout>> device_layouts,
+      PjRtDevice* device) {
+    return absl::UnimplementedError(absl::StrCat(
+        "CreateBuffersForAsyncHostToDevice with ShapeSpec and Layout is "
+        "not implemented on platform: ",
+        platform_name()));
+  }
+
+  // Variant of CreateBuffersForAsyncHostToDevice with PjRtMemorySpace.
+  virtual absl::StatusOr<std::unique_ptr<AsyncHostToDeviceTransferManager>>
+  CreateBuffersForAsyncHostToDevice(
+      absl::Span<const ShapeSpec> shape_specs,
+      std::optional<absl::Span<const Layout>> device_layouts,
+      PjRtMemorySpace* memory_space) {
+    return absl::UnimplementedError(absl::StrCat(
+        "CreateBuffersForAsyncHostToDevice with ShapeSpec and Layout is "
+        "not implemented on platform: ",
+        platform_name()));
+  }
 
   // Returns a manager for async transfers into a set of buffers with on-host
   // shapes 'shapes'.
@@ -1000,7 +1041,6 @@ class PjRtClient {
   // Create ChannelHandles for XLA send/recv.
   virtual absl::StatusOr<ChannelHandle> CreateChannelHandle() = 0;
   virtual absl::StatusOr<ChannelHandle> CreateDeviceToHostChannelHandle() = 0;
-  virtual absl::StatusOr<ChannelHandle> CreateHostToDeviceChannelHandle() = 0;
 
   // TODO(zhangqiaorjc): Experimental API to be removed.
   // Defragment device memory.

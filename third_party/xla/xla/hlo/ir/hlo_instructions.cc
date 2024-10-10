@@ -59,10 +59,10 @@ limitations under the License.
 #include "xla/service/hlo.pb.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
+#include "xla/tsl/lib/gtl/iterator_range.h"
 #include "xla/util.h"
 #include "xla/window_util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/lib/gtl/iterator_range.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"  // IWYU pragma: keep
 #include "tsl/platform/protobuf.h"
@@ -935,8 +935,7 @@ HloCollectiveInstruction::HloCollectiveInstruction(
 
 HloInstructionProto HloCollectiveInstruction::ToProto() const {
   HloInstructionProto proto = HloChannelInstruction::ToProto();
-  *proto.mutable_replica_groups() = {replica_groups().begin(),
-                                     replica_groups().end()};
+  *proto.mutable_collective_device_list() = device_list_.ToProto();
   proto.set_constrain_layout(constrain_layout_);
   return proto;
 }
@@ -945,8 +944,7 @@ void HloCollectiveInstruction::PrintExtraAttributesImpl(
     AttributePrinter& printer, const HloPrintOptions& options) const {
   HloChannelInstruction::PrintExtraAttributesImpl(printer, options);
   printer.Next([this](Printer* printer) {
-    AppendCat(printer,
-              "replica_groups=", ReplicaGroupsToString(replica_groups()));
+    AppendCat(printer, "replica_groups=", device_list_.ToString());
   });
   if (constrain_layout_) {
     printer.Next(
@@ -1879,6 +1877,35 @@ HloCallableInstruction::HloCallableInstruction(
   }
 }
 
+HloCallableInstruction::HloCallableInstruction(HloOpcode opcode,
+                                               const Shape& shape,
+                                               const std::string& name,
+                                               const std::string& attributes,
+                                               int64_t version)
+    : HloInstruction(opcode, shape) {
+  auto frontend_attributes =
+      BuildFrontendAttributesForComposite(name, attributes, version);
+  add_frontend_attributes(frontend_attributes);
+  set_is_composite(true);
+}
+
+HloCallableInstruction::HloCallableInstruction(
+    HloOpcode opcode, const Shape& shape,
+    absl::Span<HloInstruction* const> operands, HloComputation* decomposition,
+    const std::string& name, const std::string& attributes, int64_t version)
+    : HloInstruction(opcode, shape) {
+  for (auto operand : operands) {
+    AppendOperand(operand);
+  }
+  SetAndSanitizeName(HloOpcodeString(opcode));
+  AppendComputation(decomposition);
+
+  auto frontend_attributes =
+      BuildFrontendAttributesForComposite(name, attributes, version);
+  add_frontend_attributes(frontend_attributes);
+  set_is_composite(true);
+}
+
 HloCallableInstruction::~HloCallableInstruction() { ClearCalledComputations(); }
 
 HloComputation* HloCallableInstruction::called_computation() const {
@@ -1926,7 +1953,7 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
         return u->opcode() == HloOpcode::kGetTupleElement;
       });
   if (called_computations().empty()) {
-    // New fusion instruction. It should not be a multioutput instruction.
+    // New fusion instruction. It should not be a multi-output instruction.
     CHECK(!add_output);
     auto builder = HloComputation::Builder(default_called_computation_name());
     builder.AddInstruction(instruction_to_append->Clone(/*suffix=*/""));
@@ -2010,6 +2037,9 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
       // Clone's operand was not already an operand of the callable
       // instruction. Add it as an operand and add a corresponding called
       // computation parameter instruction.
+
+      // No need to create an original value for an added parameter as the
+      // original value is saved in the corresponding argument.
       called_computation_parameter = AddCallOperand(operand);
     }
     TF_CHECK_OK(
@@ -2017,6 +2047,10 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
   }
 
   if (clone != instruction_to_append) {
+    // Copy over the original value to the clone of a fused instruction.
+    if (auto original_value = instruction_to_append->original_value()) {
+      clone->set_original_value(original_value);
+    }
     VLOG(2) << "New clone:\n" << clone->ToString();
   }
 
@@ -2057,6 +2091,10 @@ HloCallableInstruction::CloneAndAppendInstructionIntoCalledComputation(
     }
     HloInstruction* new_root = called_computation()->AddInstruction(
         HloInstruction::CreateTuple(tuple_elements));
+
+    // No need to create an original value for a new root with added outputs
+    // as the original value is saved in the get-tuple-element instructions
+    // that use it.
     called_computation()->set_root_instruction(new_root,
                                                /*accept_different_shape=*/true);
     *mutable_shape() = new_root->shape();
@@ -2134,11 +2172,13 @@ void HloCallableInstruction::RecursivelySetComputationsThreadName(
 
 HloFusionInstruction::HloFusionInstruction(const Shape& shape,
                                            FusionKind fusion_kind,
-                                           HloInstruction* fused_root)
+                                           HloInstruction* fused_root,
+                                           absl::string_view prefix)
     : HloCallableInstruction(HloOpcode::kFusion, shape),
       fusion_kind_(fusion_kind) {
   CHECK(fused_root != nullptr);
-  SetAndSanitizeName(HloOpcodeString(opcode()));
+  SetAndSanitizeName(absl::StrCat(prefix, HloOpcodeString(opcode())));
+
   set_parent(fused_root->parent());
   set_metadata(fused_root->metadata());
   set_frontend_attributes(fused_root->frontend_attributes());
@@ -2385,6 +2425,13 @@ void HloFusionInstruction::MergeFusionInstructionIntoMultiOutput(
     auto cloned_instruction =
         parent()->AddInstruction(fused_instruction->CloneWithNewOperands(
             fused_instruction->shape(), new_operands, /*suffix=*/"clone"));
+    // Copy over the original value to the clone of a fused instruction.
+    // This is necessary as the clone will be cloned again when the clone is
+    // fused in FuseInstructionIntoMultiOutput(). This can be skipped if we
+    // improve the code to only clone once as stated in the preceding comment.
+    if (auto original_value = fused_instruction->original_value()) {
+      cloned_instruction->set_original_value(original_value);
+    }
     unfused_instructions.push_back(cloned_instruction);
     InsertOrDie(&old_to_new, fused_instruction, cloned_instruction);
   }
@@ -2553,6 +2600,47 @@ HloCallInstruction::HloCallInstruction(
     HloComputation* called_computation)
     : HloCallableInstruction(HloOpcode::kCall, shape, operands,
                              called_computation) {}
+
+HloCallInstruction::HloCallInstruction(const Shape& shape,
+                                       HloInstruction* decomposition_root,
+                                       const std::string& name,
+                                       const std::string& attributes,
+                                       int64_t version)
+    : HloCallableInstruction(HloOpcode::kCall, shape, name, attributes,
+                             version) {
+  CHECK(decomposition_root != nullptr);
+  SetAndSanitizeName(HloOpcodeString(opcode()));
+
+  FrontendAttributes frontend_attributes;
+  frontend_attributes.mutable_map()->insert({"composite.name", name});
+  frontend_attributes.mutable_map()->insert(
+      {"composite.attributes", attributes});
+  frontend_attributes.mutable_map()->insert(
+      {"composite.version", std::to_string(version)});
+
+  add_frontend_attributes(frontend_attributes);
+  set_is_composite(true);
+  set_parent(decomposition_root->parent());
+  set_metadata(decomposition_root->metadata());
+  CloneAndAppendInstructionIntoCalledComputation(decomposition_root);
+}
+
+HloCallInstruction::HloCallInstruction(
+    const Shape& shape, absl::Span<HloInstruction* const> operands,
+    HloComputation* decomposition, const std::string& name,
+    const std::string& attributes, int64_t version)
+    : HloCallableInstruction(HloOpcode::kCall, shape, operands, decomposition,
+                             name, attributes, version) {
+  FrontendAttributes frontend_attributes;
+  frontend_attributes.mutable_map()->insert({"composite.name", name});
+  frontend_attributes.mutable_map()->insert(
+      {"composite.attributes", attributes});
+  frontend_attributes.mutable_map()->insert(
+      {"composite.version", std::to_string(version)});
+
+  add_frontend_attributes(frontend_attributes);
+  set_is_composite(true);
+}
 
 HloRngInstruction::HloRngInstruction(
     const Shape& shape, RandomDistribution distribution,
@@ -3502,13 +3590,23 @@ HloGatherInstruction::HloGatherInstruction(
   AppendJoin(printer, dim_numbers.collapsed_slice_dims(), ",");
   printer->Append("}, start_index_map={");
   AppendJoin(printer, dim_numbers.start_index_map(), ",");
+  if (dim_numbers.operand_batching_dims_size()) {
+    printer->Append("}, operand_batching_dims={");
+    AppendJoin(printer, dim_numbers.operand_batching_dims(), ",");
+  }
+  if (dim_numbers.start_indices_batching_dims_size()) {
+    printer->Append("}, start_indices_batching_dims={");
+    AppendJoin(printer, dim_numbers.start_indices_batching_dims(), ",");
+  }
   AppendCat(printer, "}, index_vector_dim=", dim_numbers.index_vector_dim());
 }
 
 /* static */ GatherDimensionNumbers HloGatherInstruction::MakeGatherDimNumbers(
     absl::Span<const int64_t> offset_dims,
     absl::Span<const int64_t> collapsed_slice_dims,
-    absl::Span<const int64_t> start_index_map, int64_t index_vector_dim) {
+    absl::Span<const int64_t> start_index_map, int64_t index_vector_dim,
+    absl::Span<const int64_t> operand_batching_dims,
+    absl::Span<const int64_t> start_indices_batching_dims) {
   GatherDimensionNumbers gather_dim_numbers;
   for (int64_t output_window_dim : offset_dims) {
     gather_dim_numbers.add_offset_dims(output_window_dim);
@@ -3518,6 +3616,13 @@ HloGatherInstruction::HloGatherInstruction(
   }
   for (int64_t gather_dim_to_input_dim : start_index_map) {
     gather_dim_numbers.add_start_index_map(gather_dim_to_input_dim);
+  }
+  for (int64_t operand_batching_dim : operand_batching_dims) {
+    gather_dim_numbers.add_operand_batching_dims(operand_batching_dim);
+  }
+  for (int64_t start_indices_batching_dim : start_indices_batching_dims) {
+    gather_dim_numbers.add_start_indices_batching_dims(
+        start_indices_batching_dim);
   }
 
   gather_dim_numbers.set_index_vector_dim(index_vector_dim);
@@ -3603,6 +3708,14 @@ HloScatterInstruction::HloScatterInstruction(
   AppendJoin(printer, dim_numbers.inserted_window_dims(), ",");
   printer->Append("}, scatter_dims_to_operand_dims={");
   AppendJoin(printer, dim_numbers.scatter_dims_to_operand_dims(), ",");
+  if (dim_numbers.input_batching_dims_size()) {
+    printer->Append("}, input_batching_dims={");
+    AppendJoin(printer, dim_numbers.input_batching_dims(), ",");
+  }
+  if (dim_numbers.scatter_indices_batching_dims_size()) {
+    printer->Append("}, scatter_indices_batching_dims={");
+    AppendJoin(printer, dim_numbers.scatter_indices_batching_dims(), ",");
+  }
   AppendCat(printer, "}, index_vector_dim=", dim_numbers.index_vector_dim());
 }
 
@@ -3611,7 +3724,8 @@ HloScatterInstruction::MakeScatterDimNumbers(
     absl::Span<const int64_t> update_window_dims,
     absl::Span<const int64_t> inserted_window_dims,
     absl::Span<const int64_t> scatter_dims_to_operand_dims,
-    int64_t index_vector_dim) {
+    int64_t index_vector_dim, absl::Span<const int64_t> input_batching_dims,
+    absl::Span<const int64_t> scatter_indices_batching_dims) {
   ScatterDimensionNumbers scatter_dim_numbers;
   for (int64_t update_window_dim : update_window_dims) {
     scatter_dim_numbers.add_update_window_dims(update_window_dim);
@@ -3622,6 +3736,13 @@ HloScatterInstruction::MakeScatterDimNumbers(
   for (int64_t scatter_dim_to_operand_dim : scatter_dims_to_operand_dims) {
     scatter_dim_numbers.add_scatter_dims_to_operand_dims(
         scatter_dim_to_operand_dim);
+  }
+  for (int64_t input_batching_dim : input_batching_dims) {
+    scatter_dim_numbers.add_input_batching_dims(input_batching_dim);
+  }
+  for (int64_t scatter_indices_batching_dim : scatter_indices_batching_dims) {
+    scatter_dim_numbers.add_scatter_indices_batching_dims(
+        scatter_indices_batching_dim);
   }
   scatter_dim_numbers.set_index_vector_dim(index_vector_dim);
   return scatter_dim_numbers;

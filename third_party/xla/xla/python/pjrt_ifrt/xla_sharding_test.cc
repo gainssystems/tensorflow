@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "xla/python/pjrt_ifrt/xla_sharding.h"
 
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -25,12 +24,14 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_sharding.h"
 #include "xla/hlo/ir/tile_assignment.h"
+#include "xla/python/ifrt/device_list.h"
+#include "xla/python/ifrt/device_test_util.h"
 #include "xla/python/ifrt/index.h"
 #include "xla/python/ifrt/index_domain.h"
 #include "xla/python/ifrt/memory.h"
 #include "xla/python/ifrt/shape.h"
 #include "xla/python/ifrt/sharding.h"
-#include "xla/python/ifrt/sharding_test_util.h"
+#include "xla/tsl/concurrency/ref_count.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/status_matchers.h"
@@ -47,7 +48,18 @@ using ::testing::SizeIs;
 using ::tsl::testing::IsOkAndHolds;
 using ::tsl::testing::StatusIs;
 
-class HloShardingTest : public test_util::ShardingTest {};
+class HloShardingTest : public test_util::DeviceTest {};
+
+TEST_P(HloShardingTest, CreateWithBadDeviceList) {
+  auto xla_hlo_sharding = xla::HloSharding::Replicate();
+  EXPECT_DEATH(HloSharding::Create(tsl::RCReference<DeviceList>(), MemoryKind(),
+                                   xla_hlo_sharding),
+               "");
+
+  EXPECT_DEATH(HloSharding::Create(BasicDeviceList::Create({}), MemoryKind(),
+                                   xla_hlo_sharding),
+               "");
+}
 
 TEST_P(HloShardingTest, IsFullyReplicated) {
   auto device_list = GetDevices({0, 1, 2, 3, 4, 5});
@@ -117,6 +129,16 @@ TEST_P(HloShardingTest, HasSamePartitioning) {
         HloSharding::Create(device_list1, MemoryKind(), xla_hlo_sharding1);
     EXPECT_FALSE(sharding0->HasSamePartitioning(*sharding1));
   }
+
+  // Replicated sharding with different numbers of devices.
+  {
+    auto device_list1 = GetDevices({0, 1, 2});
+    std::shared_ptr<const HloSharding> hlo_sharding0 = HloSharding::Create(
+        device_list0, MemoryKind(), xla::HloSharding::Replicate());
+    std::shared_ptr<const HloSharding> hlo_sharding1 = HloSharding::Create(
+        device_list1, MemoryKind(), xla::HloSharding::Replicate());
+    EXPECT_FALSE(hlo_sharding0->HasSamePartitioning(*hlo_sharding1));
+  }
 }
 
 TEST_P(HloShardingTest, WithDeviceAssignment) {
@@ -178,8 +200,8 @@ TEST_P(HloShardingTest, DisassembleWithReplication) {
   for (int i = 0; i < 2; ++i) {
     const auto& [shape, sharding] = disassembled[i];
     EXPECT_EQ(shape, Shape({10, 20}));
-    EXPECT_EQ(*sharding,
-              *SingleDeviceSharding::Create(device_list[i], MemoryKind()));
+    EXPECT_EQ(*sharding, *SingleDeviceSharding::Create(
+                             device_list->devices()[i], MemoryKind()));
   }
 }
 
@@ -215,8 +237,8 @@ TEST_P(HloShardingTest, DisassembleWithTile) {
   for (int i = 0; i < 2; ++i) {
     const auto& [shape, sharding] = disassembled[i];
     EXPECT_EQ(shape, Shape({5, 20}));
-    EXPECT_EQ(*sharding,
-              *SingleDeviceSharding::Create(device_list[i], MemoryKind()));
+    EXPECT_EQ(*sharding, *SingleDeviceSharding::Create(
+                             device_list->devices()[i], MemoryKind()));
   }
 }
 
@@ -256,8 +278,8 @@ TEST_P(HloShardingTest, DisassembleWithUnevenTile) {
     } else {
       EXPECT_EQ(shape, Shape({5, 20}));
     }
-    EXPECT_EQ(*sharding,
-              *SingleDeviceSharding::Create(device_list[i], MemoryKind()));
+    EXPECT_EQ(*sharding, *SingleDeviceSharding::Create(
+                             device_list->devices()[i], MemoryKind()));
   }
 }
 
@@ -301,8 +323,8 @@ TEST_P(HloShardingTest, DisassembleWithPartialTile) {
   for (int i = 0; i < 6; ++i) {
     const auto& [shape, sharding] = disassembled[i];
     EXPECT_EQ(shape, Shape({5, 20}));
-    EXPECT_EQ(*sharding,
-              *SingleDeviceSharding::Create(device_list[i], MemoryKind()));
+    EXPECT_EQ(*sharding, *SingleDeviceSharding::Create(
+                             device_list->devices()[i], MemoryKind()));
   }
 }
 
@@ -346,8 +368,8 @@ TEST_P(HloShardingTest, DisassembleWithSubgroupReplicated) {
   for (int i = 0; i < 6; ++i) {
     const auto& [shape, sharding] = disassembled[i];
     EXPECT_EQ(shape, Shape({5, 20}));
-    EXPECT_EQ(*sharding,
-              *SingleDeviceSharding::Create(device_list[i], MemoryKind()));
+    EXPECT_EQ(*sharding, *SingleDeviceSharding::Create(
+                             device_list->devices()[i], MemoryKind()));
   }
 }
 
@@ -391,8 +413,39 @@ TEST_P(HloShardingTest, DisassembleWithSubgroupMaximalSlowPath) {
   for (int i = 0; i < 6; ++i) {
     const auto& [shape, sharding] = disassembled[i];
     EXPECT_EQ(shape, Shape({5, 20}));
-    EXPECT_EQ(*sharding,
-              *SingleDeviceSharding::Create(device_list[i], MemoryKind()));
+    EXPECT_EQ(*sharding, *SingleDeviceSharding::Create(
+                             device_list->devices()[i], MemoryKind()));
+  }
+}
+
+TEST_P(HloShardingTest, IndexDomainsWithManual) {
+  auto device_list = GetDevices({0, 1, 2, 3, 4, 5});
+  auto xla_hlo_sharding = xla::HloSharding::Manual();
+  std::shared_ptr<const HloSharding> sharding =
+      HloSharding::Create(device_list, MemoryKind(), xla_hlo_sharding);
+
+  Shape shape({10, 20});
+  EXPECT_THAT(
+      sharding->IndexDomains(shape).status(),
+      StatusIs(tsl::error::INVALID_ARGUMENT,
+               HasSubstr("Manual sharding does not support IndexDomains")));
+}
+
+TEST_P(HloShardingTest, DisassembleWithManual) {
+  auto device_list = GetDevices({0, 1, 2, 3, 4, 5});
+  auto xla_hlo_sharding = xla::HloSharding::Manual();
+  std::shared_ptr<const HloSharding> sharding =
+      HloSharding::Create(device_list, MemoryKind(), xla_hlo_sharding);
+
+  Shape shape({10, 20});
+  TF_ASSERT_OK_AND_ASSIGN(auto disassembled, sharding->Disassemble(shape));
+
+  ASSERT_THAT(disassembled, SizeIs(6));
+  for (int i = 0; i < 6; ++i) {
+    const auto& [shape, sharding] = disassembled[i];
+    EXPECT_EQ(shape, Shape({10, 20}));
+    EXPECT_EQ(*sharding, *SingleDeviceSharding::Create(
+                             device_list->devices()[i], MemoryKind()));
   }
 }
 
@@ -404,10 +457,11 @@ TEST_P(HloShardingTest, DisassembleFailsWithInvalidDeviceCount) {
       HloSharding::Create(device_list, MemoryKind(), xla_hlo_sharding);
 
   Shape shape({10, 20});
-  EXPECT_THAT(sharding->Disassemble(shape),
-              StatusIs(tsl::error::INVALID_ARGUMENT,
-                       HasSubstr("sharding's tile_assignment_devices and "
-                                 "device count does not match: 2 vs. 1")));
+  EXPECT_THAT(
+      sharding->Disassemble(shape),
+      StatusIs(
+          tsl::error::INVALID_ARGUMENT,
+          HasSubstr("sharding's tile count and device count does not match")));
 }
 
 TEST_P(HloShardingTest, DisassembleFailsWithMismatchingShapeDimsSize) {
@@ -440,7 +494,7 @@ TEST_P(HloShardingTest, DisassembleFailsWithDynamicShape) {
 }
 
 INSTANTIATE_TEST_SUITE_P(NumDevices, HloShardingTest,
-                         testing::Values(test_util::ShardingTestParam{
+                         testing::Values(test_util::DeviceTestParam{
                              .num_devices = 6, .num_addressable_devices = 4}));
 
 }  // namespace

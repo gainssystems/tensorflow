@@ -1,15 +1,15 @@
 """Provides the repository macro to import Triton."""
 
 load("//third_party:repo.bzl", "tf_http_archive", "tf_mirror_urls")
-load("//third_party/triton/llvm_integration:series.bzl", "llvm_patch_list")
-load("//third_party/triton/temporary:series.bzl", "temporary_patch_list")
-load("//third_party/triton/xla_extensions:series.bzl", "extensions_files_patch_list")
+load("//third_party/triton:llvm_integration/series.bzl", "llvm_patch_list")
+load("//third_party/triton:temporary/series.bzl", "temporary_patch_list")
+load("//third_party/triton:xla_extensions/series.bzl", "extensions_files_patch_list")
 
 def repo():
     """Imports Triton."""
 
-    TRITON_COMMIT = "cl648664006"
-    TRITON_SHA256 = "fcd4abc7fb7541d657c8212e2312ea9bc71eb7b2f011a964f2734b0dec7eb8d9"
+    TRITON_COMMIT = "cl680473520"
+    TRITON_SHA256 = "c18fa65138b8c566b2f0299ebde4242f0f30c3625741a17de73ed5b1990cdabb"
     tf_http_archive(
         name = "triton",
         sha256 = TRITON_SHA256,

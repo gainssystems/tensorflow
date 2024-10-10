@@ -15,26 +15,15 @@ limitations under the License.
 
 #include "xla/service/cpu/xfeed_manager.h"
 
+#include "absl/synchronization/mutex.h"
+#include "absl/types/span.h"
+#include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "tsl/platform/logging.h"
 
 namespace xla {
 namespace cpu {
 namespace runtime {
-
-void XfeedManager::Reset() {
-  infeed()->Reset();
-  outfeed()->Reset();
-}
-
-void XfeedQueueManager::Reset() {
-  absl::MutexLock l(&mu_);
-  CHECK(current_buffer_ == nullptr);
-  for (auto buffer : enqueued_buffers_) {
-    buffer->Done(ShapeUtil::MakeNil());
-  }
-  enqueued_buffers_.clear();
-}
 
 void XfeedQueueManager::EnqueueBuffersAtomically(
     absl::Span<XfeedBuffer* const> buffers) {

@@ -18,7 +18,7 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/string_view.h"
-#include "tsl/protobuf/coordination_service.pb.h"
+#include "xla/tsl/protobuf/coordination_service.pb.h"
 
 namespace tsl {
 
@@ -55,6 +55,14 @@ inline absl::Status MakeCoordinationError(
                absl::Cord(payload.SerializeAsString()));
   return s;
 }
+
+// Trims the error message by replacing the `Additional GRPC error` part.
+// Note: The duplicated error message is a quirk of the underlying gRPC code
+// that we are using. Changing the shared code may hide important messages for
+// other libraries, so we trim the error message for coordination service
+// instead. See tsl/distributed_runtime/rpc/grpc_state.h for more details.
+absl::Status TrimCoordinationErrorMessage(const absl::Status& s);
+
 }  // namespace tsl
 
 #endif  // XLA_TSL_DISTRIBUTED_RUNTIME_COORDINATION_COORDINATION_SERVICE_ERROR_UTIL_H_

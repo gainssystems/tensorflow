@@ -21,13 +21,13 @@ limitations under the License.
 #include "rocm/rocm_config.h"
 #include "xla/primitive_util.h"
 #include "xla/status_macros.h"
+#include "xla/stream_executor/gpu/scoped_activate_context.h"
 #include "xla/util.h"
 
 #if TF_HIPBLASLT
-#include "xla/stream_executor/gpu/gpu_activation.h"
+#include "xla/stream_executor/event_based_timer.h"
 #include "xla/stream_executor/gpu/gpu_helpers.h"
 #include "xla/stream_executor/gpu/gpu_stream.h"
-#include "xla/stream_executor/gpu/gpu_timer.h"
 #include "xla/stream_executor/rocm/hip_blas_lt.h"
 #include "xla/stream_executor/rocm/rocm_blas.h"
 #include "xla/stream_executor/scratch_allocator.h"
@@ -217,7 +217,7 @@ auto BlasLt::MatmulPlan::GetAlgorithms(size_t max_algorithm_count,
         hip_preference, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
         max_workspace_size));
 
-    gpu::ScopedActivateExecutorContext sac{blas_lt_ref_.parent_};
+    gpu::ScopedActivateContext sac{blas_lt_ref_.parent_};
 
     // hipBlasLt requires setting the bias pointer (even a dummy one), otherwise
     // no algorithms can be found for "bias epilogues". This is to be removed
@@ -395,12 +395,12 @@ absl::Status BlasLt::MatmulPlan::DoMatmul(
       blas_lt_ref_.parent_->RecordApiTrace(StreamExecutor::GemmCallTrace{
           StreamExecutor::GemmCallTrace::GemmType::kBlasLt, 0, a.size(),
           b.size()});
+  std::unique_ptr<EventBasedTimer> timer;
 
-  TF_ASSIGN_OR_RETURN(
-      std::optional<gpu::GpuTimer> timer,
-      gpu::GpuTimer::CreateIfNeeded(
-          stream, profile_result && profile_result->warmup_run_executed(),
-          profile_result));
+  if (profile_result != nullptr) {
+    TF_ASSIGN_OR_RETURN(timer, stream->CreateEventBasedTimer(
+                                   profile_result->warmup_run_executed()));
+  }
 
   void* workspace_addr = nullptr;
   uint64_t workspace_size = 0;
@@ -459,7 +459,7 @@ absl::Status BlasLt::MatmulPlan::DoMatmul(
           "hipblaslt does not support auxiliary inputs / outputs");
     }
 
-    gpu::ScopedActivateExecutorContext sac{blas_lt_ref_.parent_};
+    gpu::ScopedActivateContext sac{blas_lt_ref_.parent_};
 
     if (palgo != nullptr) {
       SE_HIPBLAS_RETURN_IF_ERROR(wrap::hipblasLtMatmul(

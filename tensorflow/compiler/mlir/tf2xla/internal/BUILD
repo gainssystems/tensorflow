@@ -38,6 +38,7 @@ cc_library(
     hdrs = ["test_matchers.h"],
     deps = [
         "//tensorflow/compiler/mlir/tf2xla:compile_mlir_util",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest",
         "@local_tsl//tsl/platform:statusor",
     ],
@@ -138,14 +139,12 @@ cc_library(
     srcs = ["legalize_tf_to_hlo.cc"],
     hdrs = ["legalize_tf_to_hlo.h"],
     deps = [
-        ":compilation_timer",
         ":legalize_tf_mlir",
         "//tensorflow/compiler/mlir/tf2xla/api/v1:compile_tf_graph",
         "//tensorflow/compiler/tf2xla:layout_util",
         "//tensorflow/compiler/tf2xla:xla_helpers",
         "//tensorflow/compiler/tf2xla:xla_tpu_backend_registration",
         "//tensorflow/core:framework",
-        "//tensorflow/core:lib",
         "//tensorflow/core/platform:status",
         "//tensorflow/core/protobuf/tpu:compile_metadata_proto_cc",
         "//tensorflow/core/tpu/kernels:tpu_compile_op_support",
@@ -243,8 +242,8 @@ tf_cc_test(
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Transforms",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:status",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
     ],
 )
 
@@ -295,14 +294,13 @@ tf_cc_test(
         "//tensorflow/core:testlib",
         "//tensorflow/core/platform:enable_tf2_utils",
         # "//tensorflow/core/platform:resource_loader",
-        "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
     ],
 )
 
 tf_proto_library(
     name = "reproducer_proto",
     srcs = ["reproducer.proto"],
-    cc_api_version = 2,
     protodeps = [
         "//tensorflow/core:protos_all",
         "//tensorflow/core/protobuf/tpu:compile_metadata_proto",

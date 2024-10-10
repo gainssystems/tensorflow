@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
+#include "absl/log/check.h"
 #include "absl/strings/string_view.h"
 #include "xla/debug_options_flags.h"
 #include "xla/service/computation_layout.h"
@@ -226,6 +227,7 @@ class HloModuleConfig {
   std::string compilation_cache_key() const;
 
   const DebugOptions& debug_options() const { return debug_options_; }
+  DebugOptions& mutable_debug_options() { return debug_options_; }
   void set_debug_options(const DebugOptions& debug_options) {
     debug_options_ = debug_options;
   }
@@ -250,6 +252,22 @@ class HloModuleConfig {
   }
   void set_static_device_assignment(const DeviceAssignment& device_assignment) {
     static_device_assignment_ = device_assignment;
+  }
+
+  // Checks if this config has a simulated device assignment.
+  bool has_pre_simulation_device_assignment() const {
+    return pre_simulation_device_assignment_.has_value();
+  }
+
+  // Getter and setter of the compile-time known device assignment.
+  const DeviceAssignment& pre_simulation_device_assignment() const {
+    CHECK(pre_simulation_device_assignment_.has_value());
+    return *pre_simulation_device_assignment_;
+  }
+
+  void set_pre_simulation_device_assignment(
+      const DeviceAssignment& device_assignment) {
+    pre_simulation_device_assignment_ = device_assignment;
   }
 
   bool allow_separate_sharding_programs() const {
@@ -375,6 +393,11 @@ class HloModuleConfig {
     device_memory_size_ = device_memory_size;
   }
 
+  bool use_shardy_partitioner() const { return use_shardy_partitioner_; }
+  void set_use_shardy_partitioner(bool use_shardy_partitioner) {
+    use_shardy_partitioner_ = use_shardy_partitioner;
+  }
+
  private:
   // If you add new members, be sure to update compilation_cache_key and the
   // HloModuleConfigProto.
@@ -422,6 +445,9 @@ class HloModuleConfig {
 
   // Compile-time known device assignment.
   std::optional<DeviceAssignment> static_device_assignment_;
+
+  // Compile-time known device assignment.
+  std::optional<DeviceAssignment> pre_simulation_device_assignment_;
 
   bool allow_separate_sharding_programs_ = false;
 
@@ -501,6 +527,8 @@ class HloModuleConfig {
   std::string fdo_profile_;
 
   int64_t device_memory_size_ = 0;
+
+  bool use_shardy_partitioner_ = false;
   // LINT.ThenChange(//tensorflow/compiler/xla/xla.proto)
 };
 

@@ -63,7 +63,7 @@ LatencyEstimator::TimeCost AnalyticalLatencyEstimator::NodeCost(
 
   absl::Duration total_estimated_time =
       GpuPerformanceModel::EstimateRunTimeForInstruction(
-          instr, &*cost_analysis_,
+          instr, gpu_info_, &*cost_analysis_,
           GpuPerformanceModelOptions::ForModule(instr->GetModule()))
           .exec_time;
   LatencyEstimator::TimeCost cost_in_us =
@@ -86,8 +86,9 @@ AnalyticalLatencyEstimator::AnalyticalLatencyEstimator(
   cost_analysis_.emplace(
       GpuHloCostAnalysis::Options{shape_size_function_,
                                   /*per_second_rates=*/{},
+                                  /*min_latencies_seconds=*/{},
                                   /*count_multiple_input_accesses=*/true},
-      &gpu_info_);
+      gpu_info_);
   TF_CHECK_OK(computation->Accept(&cost_analysis_.value()));
 }
 

@@ -44,7 +44,6 @@ namespace hlo_sharding_util {
 struct GatherScatterParallelDims {
   absl::InlinedVector<int64_t, 1> indices_parallel_dims;
   absl::InlinedVector<int64_t, 1> operand_parallel_dims;
-  std::vector<int64_t> index_parallel_in_dim;
 };
 
 // Determines if the first operand 'potential_subsharding' is a subsharding of
@@ -69,9 +68,12 @@ bool MergeSharding(const HloSharding& to_merge, HloSharding* dst,
                    bool may_combine_partial_sharding);
 
 // Merges `to_merge` into `dst` only if they are compatible, and the merged
-// sharding has >= minimum_tiles tiles. Returns if merging happened.
+// sharding has >= `minimum_tiles` tiles. Returns if merging happened.
 bool MergeShardingIfCompatible(const HloSharding& to_merge,
                                int64_t minimum_tiles, HloSharding* dst);
+
+// Same as above, but with `minimum_tiles` = `dst->NumTiles() + 1`.
+bool MergeShardingIfCompatible(const HloSharding& to_merge, HloSharding* dst);
 
 // Find a reasonable common sharding for a list of shardings. The reasonable
 // sharding should incur little(the least) amount of total resharding cost when
@@ -119,7 +121,7 @@ HloSharding TransposeSharding(const HloSharding& sharding,
 // maximal sharding returns the original sharding.
 std::optional<HloSharding> ReshapeSharding(const Shape& source_shape,
                                            const Shape& target_shape,
-                                           const HloSharding& sharding);
+                                           const HloSharding& source_sharding);
 
 // Propagates sharding through reshape. It tries to find partial matches on
 // subsets of dimensions that could satisfy ReshapeSharding() constraints, then
@@ -356,16 +358,9 @@ GetGatherScatterIndexPassthroughOutputOrUpdateDims(
 // Infer output sharding on index parallel dimensions for gather/scatter from
 // gather operand/indices or scatter operands/indices/updates.
 HloSharding InferGatherScatterParallelShardingFromOperandSharding(
-    const HloSharding& operand_sharding, const Shape& operand_shape,
-    const Shape& shape,
+    const HloSharding& operand_sharding, const Shape& shape,
     absl::Span<const int64_t> output_aligned_operand_parallel_dims,
     absl::Span<const int64_t> output_parallel_dims);
-
-// Returns the parallel dimensions of the data operand of a gather/scatter with
-// the order of the parallel dimensions matching that of the parallel dimensions
-// of the indices.
-absl::InlinedVector<int64_t, 1> IndexAlignedOperandParallelDims(
-    const GatherScatterParallelDims& parallel_dims);
 
 // Represents grouping devices in a tiled sharding along certain dimensions.
 // Elements in group dimensions define different device groups, and the sharding
@@ -475,9 +470,9 @@ bool IsSortOperandShardingMovable(const HloInstruction* sort_operand,
 // Returns a set of parallel dimensions for Gather/Scatter instructions given
 // the parameters for the op.
 std::optional<GatherScatterParallelDims> GetGatherScatterBatchParallelDims(
-    const HloInstruction* indices, absl::Span<const int64_t> slice_sizes,
-    int64_t index_vector_dim, absl::Span<const int64_t> index_map,
-    const CallGraph& call_graph);
+    const HloInstruction* operand, const HloInstruction* indices,
+    absl::Span<const int64_t> slice_sizes, int64_t index_vector_dim,
+    absl::Span<const int64_t> index_map, const CallGraph& call_graph);
 
 // Returns the sharding of an output of an instruction. Some instructions have
 // special handling like Outfeed and this function takes care of those.
@@ -533,6 +528,14 @@ std::optional<HloSharding> ReturnImprovedShardingImpl(
 // operand.
 HloSharding InferDotOperandSharding(
     const HloInstruction* dot, int64_t operand_index,
+    const dot_as_convolution_util::DotConvolutionDimsInfo& dnums,
+    bool consider_other_operand, bool may_combine_partial_sharding);
+
+// Same as above, but takes the sharding of the dot and the other operand as
+// input.
+HloSharding InferDotOperandSharding(
+    const HloSharding* dot_sharding, const HloSharding* other_operand_sharding,
+    int64_t operand_index,
     const dot_as_convolution_util::DotConvolutionDimsInfo& dnums,
     bool consider_other_operand, bool may_combine_partial_sharding);
 

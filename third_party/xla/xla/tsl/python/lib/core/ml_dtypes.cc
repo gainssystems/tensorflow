@@ -24,9 +24,9 @@ limitations under the License.
 #include "numpy/ndarraytypes.h"
 #include "absl/base/attributes.h"
 #include "absl/base/call_once.h"
-#include "pybind11/gil.h"  // from @pybind11
-#include "pybind11/numpy.h"  // from @pybind11
-#include "pybind11/pybind11.h"  // from @pybind11
+#include "pybind11/gil.h"
+#include "pybind11/numpy.h"
+#include "pybind11/pybind11.h"
 
 namespace tsl {
 namespace ml_dtypes {
@@ -61,6 +61,10 @@ struct MlDtypesInitInfo {
 
       numpy_dtypes.bfloat16 =
           py::dtype::from_args(ml_dtypes.attr("bfloat16")).num();
+      numpy_dtypes.float8_e3m4 =
+          py::dtype::from_args(ml_dtypes.attr("float8_e3m4")).num();
+      numpy_dtypes.float8_e4m3 =
+          py::dtype::from_args(ml_dtypes.attr("float8_e4m3")).num();
       numpy_dtypes.float8_e4m3fn =
           py::dtype::from_args(ml_dtypes.attr("float8_e4m3fn")).num();
       numpy_dtypes.float8_e5m2 =
@@ -81,6 +85,8 @@ struct MlDtypesInitInfo {
 
     // Verify all types were successfully loaded.
     if (numpy_dtypes.bfloat16 == NPY_NOTYPE ||
+        numpy_dtypes.float8_e3m4 == NPY_NOTYPE ||
+        numpy_dtypes.float8_e4m3 == NPY_NOTYPE ||
         numpy_dtypes.float8_e4m3fn == NPY_NOTYPE ||
         numpy_dtypes.float8_e4m3fnuz == NPY_NOTYPE ||
         numpy_dtypes.float8_e4m3b11fnuz == NPY_NOTYPE ||

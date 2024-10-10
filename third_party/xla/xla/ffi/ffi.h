@@ -25,7 +25,10 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 
 // IWYU pragma: begin_exports
 #include "xla/ffi/api/api.h"
@@ -37,16 +40,21 @@ limitations under the License.
 #include "absl/base/optimization.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
+#include "xla/executable_run_options.h"
 #include "xla/ffi/api/c_api.h"
 #include "xla/ffi/api/c_api_internal.h"  // IWYU pragma: keep
 #include "xla/ffi/execution_context.h"
+#include "xla/ffi/execution_state.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/primitive_util.h"
 #include "xla/stream_executor/device_memory.h"
 #include "xla/stream_executor/device_memory_allocator.h"
 #include "xla/stream_executor/scratch_allocator.h"
 #include "xla/stream_executor/stream.h"
+#include "xla/tsl/concurrency/async_value_ref.h"
+#include "xla/tsl/concurrency/chain.h"
 #include "xla/types.h"  // IWYU pragma: keep
+#include "xla/util.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/logging.h"
 
@@ -58,6 +66,7 @@ struct DeviceOrdinal {};      // binds `int32_t` with device ordinal
 struct Allocator {};          // binds `se::DeviceMemoryAllocator*`
 struct ScratchAllocator {};   // binds `se::OwningScratchAllocator`
 struct CalledComputation {};  // binds `HloComputation*`
+struct IntraOpThreadPool {};  // binds `const Eigen::ThreadPoolDevice*`
 
 //===----------------------------------------------------------------------===//
 // Arguments
@@ -86,8 +95,6 @@ class AnyBuffer {
 
   PrimitiveType element_type() const { return PrimitiveType(buf_->dtype); }
 
-  void* untyped_data() const { return buf_->data; }
-
   Dimensions dimensions() const { return Dimensions(buf_->dims, buf_->rank); }
 
   ABSL_ATTRIBUTE_ALWAYS_INLINE size_t size_bytes() const {
@@ -100,6 +107,8 @@ class AnyBuffer {
   ABSL_ATTRIBUTE_ALWAYS_INLINE size_t element_count() const {
     return absl::c_accumulate(dimensions(), int64_t{1}, std::multiplies<>());
   }
+
+  void* untyped_data() const { return buf_->data; }
 
   se::DeviceMemoryBase device_memory() const {
     return se::DeviceMemoryBase(untyped_data(), size_bytes());
@@ -124,12 +133,6 @@ class Buffer {
 
   PrimitiveType element_type() const { return dtype; }
 
-  void* untyped_data() const { return buf_->data; }
-
-  internal::NativeType<dtype>* typed_data() const {
-    return reinterpret_cast<internal::NativeType<dtype>*>(untyped_data());
-  }
-
   Dimensions dimensions() const {
     return Dimensions(buf_->dims,
                       rank == internal::kDynamicRank ? buf_->rank : rank);
@@ -144,6 +147,12 @@ class Buffer {
 
   ABSL_ATTRIBUTE_ALWAYS_INLINE size_t element_count() const {
     return absl::c_accumulate(dimensions(), int64_t{1}, std::multiplies<>());
+  }
+
+  void* untyped_data() const { return buf_->data; }
+
+  internal::NativeType<dtype>* typed_data() const {
+    return reinterpret_cast<internal::NativeType<dtype>*>(untyped_data());
   }
 
   se::DeviceMemory<internal::NativeType<dtype>> device_memory() const {
@@ -237,6 +246,41 @@ struct ArgDecoding<Buffer<dtype, rank>> {
 };
 
 //===----------------------------------------------------------------------===//
+// Type-safe wrapper for accessing a variable number of arguments.
+//===----------------------------------------------------------------------===//
+
+class RemainingArgs : public internal::RemainingArgsBase {
+ public:
+  using internal::RemainingArgsBase::RemainingArgsBase;
+
+  template <typename T>
+  absl::StatusOr<T> get(size_t index) const {
+    size_t idx = offset() + index;
+    if (ABSL_PREDICT_FALSE(idx >= args()->size)) {
+      return InvalidArgument("Index out of range.");
+    }
+
+    DiagnosticEngine diagnostic;
+    std::optional<T> value = ArgDecoding<T>::Decode(
+        args()->types[idx], args()->args[idx], diagnostic);
+    if (ABSL_PREDICT_FALSE(!value.has_value())) {
+      return Internal("%s", diagnostic.Result());
+    }
+
+    return *value;
+  }
+};
+
+template <>
+struct internal::Decode<internal::RemainingArgsTag> {
+  static std::optional<RemainingArgs> call(DecodingOffsets& offsets,
+                                           DecodingContext& ctx,
+                                           DiagnosticEngine& diagnostic) {
+    return RemainingArgs(&ctx.call_frame->args, offsets.args);
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // Results decoding
 //===----------------------------------------------------------------------===//
 
@@ -266,6 +310,41 @@ struct RetDecoding<Buffer<dtype, rank>> {
 
     return internal::DecodeBuffer<dtype, rank>(
         reinterpret_cast<XLA_FFI_Buffer*>(arg), diagnostic);
+  }
+};
+
+//===----------------------------------------------------------------------===//
+// Type-safe wrapper for accessing a variable number of results.
+//===----------------------------------------------------------------------===//
+
+class RemainingRets : public internal::RemainingRetsBase {
+ public:
+  using internal::RemainingRetsBase::RemainingRetsBase;
+
+  template <typename T>
+  absl::StatusOr<Result<T>> get(size_t index) const {
+    size_t idx = offset() + index;
+    if (ABSL_PREDICT_FALSE(idx >= rets()->size)) {
+      return InvalidArgument("Index out of range.");
+    }
+
+    DiagnosticEngine diagnostic;
+    std::optional<Result<T>> value = RetDecoding<T>::Decode(
+        rets()->types[idx], rets()->rets[idx], diagnostic);
+    if (ABSL_PREDICT_FALSE(!value.has_value())) {
+      return Internal("%s", diagnostic.Result());
+    }
+
+    return *value;
+  }
+};
+
+template <>
+struct internal::Decode<internal::RemainingRetsTag> {
+  static std::optional<RemainingRets> call(DecodingOffsets& offsets,
+                                           DecodingContext& ctx,
+                                           DiagnosticEngine& diagnostic) {
+    return RemainingRets(&ctx.call_frame->rets, offsets.rets);
   }
 };
 
@@ -328,6 +407,49 @@ struct AttrDecoding<Pointer<T>> {
 };
 
 //===----------------------------------------------------------------------===//
+// Type-safe wrapper for accessing dictionary attributes.
+//===----------------------------------------------------------------------===//
+
+class Dictionary : public internal::DictionaryBase {
+ public:
+  using internal::DictionaryBase::DictionaryBase;
+
+  template <typename T>
+  absl::StatusOr<T> get(std::string_view name) const {
+    DiagnosticEngine diagnostic;
+    std::optional<T> value = internal::DictionaryBase::get<T>(name, diagnostic);
+    if (!value.has_value()) {
+      return Internal("%s", diagnostic.Result());
+    }
+    return *value;
+  }
+};
+
+// Decode `AttrsTag` (all attributes) into a `Dictionary`.
+template <>
+struct internal::Decode<internal::AttrsTag<Dictionary>> {
+  static std::optional<Dictionary> call(DecodingOffsets& offsets,
+                                        DecodingContext& ctx,
+                                        DiagnosticEngine& diagnostic) {
+    return Dictionary(&ctx.call_frame->attrs);
+  }
+};
+
+// Decode individual attribute into `Dictionary` type.
+template <>
+struct AttrDecoding<Dictionary> {
+  using Type = Dictionary;
+  static std::optional<Dictionary> Decode(XLA_FFI_AttrType type, void* attr,
+                                          DiagnosticEngine& diagnostic) {
+    if (XLA_FFI_PREDICT_FALSE(type != XLA_FFI_AttrType_DICTIONARY)) {
+      return diagnostic.Emit("Wrong attribute type: expected ")
+             << XLA_FFI_AttrType_DICTIONARY << " but got " << type;
+    }
+    return Dictionary(reinterpret_cast<XLA_FFI_Attrs*>(attr));
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // Context decoding
 //===----------------------------------------------------------------------===//
 
@@ -363,7 +485,7 @@ struct CtxDecoding<Allocator> {
                                     DiagnosticEngine&) {
     void* device_allocator =
         api->internal_api->XLA_FFI_INTERNAL_DeviceMemoryAllocator_Get(ctx);
-    return reinterpret_cast<se::DeviceMemoryAllocator*>(device_allocator);
+    return reinterpret_cast<Type>(device_allocator);
   }
 };
 
@@ -397,11 +519,24 @@ struct CtxDecoding<CalledComputation> {
   }
 };
 
+template <>
+struct CtxDecoding<IntraOpThreadPool> {
+  using Type = const Eigen::ThreadPoolDevice*;
+
+  static std::optional<Type> Decode(const XLA_FFI_Api* api,
+                                    XLA_FFI_ExecutionContext* ctx,
+                                    DiagnosticEngine&) {
+    void* intra_op_thread_pool =
+        api->internal_api->XLA_FFI_INTERNAL_IntraOpThreadPool_Get(ctx);
+    return reinterpret_cast<Type>(intra_op_thread_pool);
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // UserData
 //===----------------------------------------------------------------------===//
 
-// A type tag for automatic decoding user data passed via the execution context.
+// A type tag for automatic user data decoding passed via the execution context.
 template <typename T>
 struct UserData {};
 
@@ -431,13 +566,82 @@ struct CtxDecoding<UserData<T>> {
 };
 
 //===----------------------------------------------------------------------===//
+// State
+//===----------------------------------------------------------------------===//
+
+// A type tag for automatic state decoding passed via the execution context.
+template <typename T>
+struct State {};
+
+template <typename T>
+struct CtxDecoding<State<T>> {
+  using Type = T*;
+
+  static std::optional<Type> Decode(const XLA_FFI_Api* api,
+                                    XLA_FFI_ExecutionContext* ctx,
+                                    DiagnosticEngine& diagnostic) {
+    auto* execution_state = reinterpret_cast<const ExecutionState*>(
+        api->internal_api->XLA_FFI_INTERNAL_ExecutionState_Get(ctx));
+
+    if (execution_state == nullptr) {
+      return diagnostic.Emit(
+          "Execution state must be not null to fetch State parameter");
+    }
+
+    auto state = execution_state->Get<T>();
+    if (!state.ok()) {
+      return diagnostic.Emit("Failed to get state from execution context: ")
+             << state.status().message();
+    }
+
+    return *std::move(state);
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // Result encoding
 //===----------------------------------------------------------------------===//
 
-template <>
-struct ResultEncoding<absl::Status> {
-  static XLA_FFI_Error* Encode(const XLA_FFI_Api* api, absl::Status status) {
+template <ExecutionStage stage>
+struct ResultEncoding<stage, absl::Status> {
+  static XLA_FFI_Error* Encode(const XLA_FFI_Api* api,
+                               XLA_FFI_ExecutionContext* ctx,
+                               absl::Status status) {
+    if (ABSL_PREDICT_TRUE(status.ok())) {
+      return nullptr;
+    }
     return api->internal_api->XLA_FFI_INTERNAL_Error_Forward(&status);
+  }
+};
+
+template <typename T>
+struct ResultEncoding<ExecutionStage::kInstantiate,
+                      absl::StatusOr<std::unique_ptr<T>>> {
+  static XLA_FFI_Error* Encode(const XLA_FFI_Api* api,
+                               XLA_FFI_ExecutionContext* ctx,
+                               absl::StatusOr<std::unique_ptr<T>> state) {
+    if (ABSL_PREDICT_TRUE(state.ok())) {
+      auto* execution_state = reinterpret_cast<ExecutionState*>(
+          api->internal_api->XLA_FFI_INTERNAL_ExecutionState_Get(ctx));
+      absl::Status status = execution_state->Set<T>(*std::move(state));
+      if (ABSL_PREDICT_TRUE(status.ok())) {
+        return nullptr;
+      }
+      return api->internal_api->XLA_FFI_INTERNAL_Error_Forward(&status);
+    }
+
+    absl::Status status = state.status();
+    return api->internal_api->XLA_FFI_INTERNAL_Error_Forward(&status);
+  }
+};
+
+template <ExecutionStage stage>
+struct ResultEncoding<stage, tsl::AsyncValueRef<tsl::Chain>> {
+  static XLA_FFI_Future* Encode(const XLA_FFI_Api* api,
+                                XLA_FFI_ExecutionContext* ctx,
+                                tsl::AsyncValueRef<tsl::Chain> async_value) {
+    return api->internal_api->XLA_FFI_INTERNAL_Future_Forward(
+        async_value.release());
   }
 };
 

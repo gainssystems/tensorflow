@@ -39,6 +39,7 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "absl/strings/escaping.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
@@ -54,7 +55,7 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/type_util.h"
 #include "xla/array2d.h"
 #include "xla/array4d.h"
-#include "xla/client/sharding_builder.h"
+#include "xla/hlo/builder/sharding_builder.h"
 #include "xla/service/computation_placer.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
@@ -573,7 +574,7 @@ Status FindHostComputeKeyPlaceholderNodes(
 
   for (Node* node : graph->op_nodes()) {
     if (node->type_string() == "Placeholder" &&
-        str_util::EndsWith(node->name(), "_key_placeholder")) {
+        absl::EndsWith(node->name(), "_key_placeholder")) {
       const AttrValue* call_node_attr =
           node->attrs().Find("_host_compute_call_node");
       if (call_node_attr != nullptr) {

@@ -26,23 +26,26 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "absl/base/optimization.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/bind_front.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
+#include "xla/tsl/lib/io/table.h"
+#include "xla/tsl/profiler/utils/timespan.h"
 #include "tensorflow/core/profiler/convert/trace_viewer/trace_events_filter_interface.h"
 #include "tensorflow/core/profiler/convert/trace_viewer/trace_events_util.h"
 #include "tensorflow/core/profiler/convert/trace_viewer/trace_viewer_visibility.h"
 #include "tensorflow/core/profiler/lib/context_types.h"
 #include "tensorflow/core/profiler/protobuf/task.pb.h"
 #include "tensorflow/core/profiler/protobuf/trace_events.pb.h"
-#include "tsl/lib/io/table.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/file_system.h"
 #include "tsl/platform/status.h"
-#include "tsl/profiler/utils/timespan.h"
+#include "tsl/profiler/lib/context_types.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -54,11 +57,11 @@ using TraceEventTrack = std::vector<TraceEvent*>;
 std::vector<TraceEvent*> MergeEventTracks(
     const std::vector<const TraceEventTrack*>& event_tracks);
 
-tsl::Status DoStoreAsLevelDbTable(
+absl::Status DoStoreAsLevelDbTable(
     std::unique_ptr<tsl::WritableFile>& file, const Trace& trace,
     const std::vector<std::vector<const TraceEvent*>>& events_by_level);
 
-tsl::Status DoLoadFromLevelDbTable(
+absl::Status DoLoadFromLevelDbTable(
     const std::string& filename,
     std::unique_ptr<TraceEventsFilterInterface> filter,
     std::unique_ptr<TraceVisibilityFilter> visibility_filter,
@@ -73,8 +76,12 @@ absl::Status ReadFileTraceMetadata(std::string& filepath, Trace* trace);
 std::vector<std::vector<const TraceEvent*>> GetEventsByLevel(
     const Trace& trace, std::vector<TraceEvent*>& events);
 
-// Returns the level that an event with `duration_ps` would go into.
-int GetLevelForDuration(uint64_t duration_ps);
+// Return the minimum duration an event can have in `level`.
+uint64_t LayerResolutionPs(unsigned level);
+
+// Returns <lower, upper> bounds (in picoseconds) for the level that an event
+// with `duration_ps` would go into. (upper >= duration_ps > lower)
+std::pair<uint64_t, uint64_t> GetLevelBoundsForDuration(uint64_t duration_ps);
 
 struct EventFactory {
   TraceEvent* Create() {
@@ -280,7 +287,7 @@ class TraceEventsContainerBase {
   // Loads the contents of this container from a level-db sstable file.
   // In order to be efficient, requires resolution__ to be set.
   // If span_ is not set, it is initialized from the loaded trace_.
-  tsl::Status LoadFromLevelDbTable(
+  absl::Status LoadFromLevelDbTable(
       const std::string& filename,
       std::unique_ptr<TraceEventsFilterInterface> filter = nullptr,
       std::unique_ptr<TraceVisibilityFilter> visibility = nullptr,

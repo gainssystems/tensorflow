@@ -437,7 +437,7 @@ absl::StatusOr<bool> TryRemoveDeadWhileParams(HloInstruction* while_op) {
   absl::flat_hash_map<HloInstruction*, InputIndicesSet> inst_input_deps;
   // Find disjoint sets of connected instruction groups. This helps finding a
   // group of inter-dependent indices that can be removed together. For case 2).
-  absl::flat_hash_map<HloInstruction*, tensorflow::UnionFind<HloInstruction*>>
+  absl::flat_hash_map<HloInstruction*, UnionFind<HloInstruction*>>
       disjoint_sets;
   // Initialize.
   for (HloComputation* comp : {while_body, while_cond}) {
@@ -954,8 +954,8 @@ static absl::StatusOr<bool> TryRemoveWhileLoop(HloInstruction* while_op) {
   // inline the call.
   const auto& attrs = while_op->frontend_attributes().map();
   bool skip_trip_count_one_simplification =
-      attrs.contains("skip-simplify-while-loops/trip-count-one") &&
-      (attrs.at("skip-simplify-while-loops/trip-count-one") == "true");
+      attrs.contains("skip-simplify-while-loops_trip-count-one") &&
+      (attrs.at("skip-simplify-while-loops_trip-count-one") == "true");
   if (trip_count && *trip_count == 1 && !skip_trip_count_one_simplification) {
     // Do not simplify the loop away when there is a side-effectful op,
     // otherwise the infeed op may not inherit the data dependency from

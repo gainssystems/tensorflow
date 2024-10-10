@@ -29,7 +29,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "tensorflow/lite/allocation.h"
+#include "tensorflow/compiler/mlir/lite/allocation.h"
 #include "tensorflow/lite/array.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/c/common_internal.h"
@@ -40,8 +40,10 @@ limitations under the License.
 #include "tensorflow/lite/core/api/tensor_utils.h"
 #include "tensorflow/lite/core/c/c_api_types.h"
 #include "tensorflow/lite/core/c/common.h"
+#include "tensorflow/lite/experimental/resource/initialization_status.h"
 #include "tensorflow/lite/experimental/resource/resource_base.h"
 #include "tensorflow/lite/graph_info.h"
+#include "tensorflow/lite/logger.h"
 #include "tensorflow/lite/memory_planner.h"
 #include "tensorflow/lite/minimal_logging.h"
 #include "tensorflow/lite/profiling/telemetry/telemetry.h"
@@ -1504,7 +1506,8 @@ TfLiteStatus Subgraph::PrepareOpsStartingAt(
                               node_index);
 #endif  // TF_LITE_TENSORFLOW_PROFILER
     const TfLiteStatus op_prepare_status = OpPrepare(registration, &node);
-    if (op_prepare_status != kTfLiteOk) {
+    if (op_prepare_status != kTfLiteOk &&
+        op_prepare_status != kTfLiteOutputShapeNotKnown) {
       ReportOpError(&context_, node, registration, node_index,
                     "failed to prepare");
       return op_prepare_status;
@@ -1515,7 +1518,8 @@ TfLiteStatus Subgraph::PrepareOpsStartingAt(
     // Discontinue if the node has dynamic outputs. Note that we don't
     // stop for dynamic temporary tensors since they won't affect the
     // sizes of other tensors in the graph.
-    if (HasDynamicTensor(context_, node.outputs, &dynamic_tensor_index_)) {
+    if (HasDynamicTensor(context_, node.outputs, &dynamic_tensor_index_) ||
+        op_prepare_status == kTfLiteOutputShapeNotKnown) {
       has_dynamic_tensors_ = true;
       return kTfLiteOk;
     }
@@ -2513,6 +2517,24 @@ void Subgraph::MaybeReleaseDynamicTensors(const TfLiteNode& node,
       }
     }
   }
+}
+
+TfLiteStatus Subgraph::SetBufferHandleImpl(
+    TfLiteContext* context, TfLiteTensor* tensor,
+    TfLiteBufferHandle buffer_handle, TfLiteDelegate* delegate,
+    bool release_existing_buffer_handle) {
+  TF_LITE_ENSURE(context, tensor != nullptr);
+  TF_LITE_ENSURE(context,
+                 tensor->delegate == nullptr || tensor->delegate == delegate);
+  tensor->delegate = delegate;
+  if (release_existing_buffer_handle &&
+      tensor->buffer_handle != kTfLiteNullBufferHandle) {
+    TF_LITE_ENSURE_STATUS(TfLiteDelegateFreeBufferHandleInternal(
+        context, tensor->delegate, &(tensor->buffer_handle)));
+  }
+  tensor->buffer_handle = buffer_handle;
+
+  return kTfLiteOk;
 }
 
 }  // namespace tflite

@@ -62,20 +62,14 @@ bool BufferUse::ReadWriteSet::HasConflicts(const BufferUse& use) const {
              : overlaps(write_, use);
 }
 
-bool BufferUse::ReadWriteSet::HasConflicts(
-    absl::Span<const BufferUse> uses) const {
-  return absl::c_any_of(
-      uses, [&](const BufferUse& use) { return HasConflicts(use); });
-}
-
 bool BufferUse::ReadWriteSet::HasConflicts(const ReadWriteSet& other) {
   return absl::c_any_of(other.read_,
                         [&](const BufferAllocation::Slice& slice) {
-                          return HasConflicts({slice, BufferUse::kRead});
+                          return HasConflicts(BufferUse::Read(slice));
                         }) ||
          absl::c_any_of(other.write_,
                         [&](const BufferAllocation::Slice& slice) {
-                          return HasConflicts({slice, BufferUse::kWrite});
+                          return HasConflicts(BufferUse::Write(slice));
                         });
 }
 

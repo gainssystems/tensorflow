@@ -37,10 +37,9 @@ class HloFusionAdaptor;
 // Treats HloInstructions as if they were unfused.
 class HloInstructionAdaptor {
  public:
-  HloInstructionAdaptor() = default;
+  HloInstructionAdaptor() = delete;
   HloInstructionAdaptor(const HloInstruction& instruction,
-                        const HloFusionAdaptor* parent)
-      : instruction_(&instruction), parent_(parent) {}
+                        const HloFusionAdaptor* parent);
 
   HloOpcode opcode() const { return instruction_->opcode(); }
   absl::string_view name() const { return instruction_->name(); }
@@ -53,6 +52,8 @@ class HloInstructionAdaptor {
 
   friend bool operator==(const HloInstructionAdaptor& lhs,
                          const HloInstructionAdaptor& rhs);
+  friend bool operator!=(const HloInstructionAdaptor& lhs,
+                         const HloInstructionAdaptor& rhs);
   template <typename H>
   friend H AbslHashValue(H h, const HloInstructionAdaptor& m);
 
@@ -63,7 +64,7 @@ class HloInstructionAdaptor {
  private:
   const HloInstruction* instruction_;
 
-  // Pointer to the parent fusion adaptor. Can not be null.
+  // Pointer to the parent fusion adaptor. Is never null.
   const HloFusionAdaptor* parent_;
 };
 
@@ -95,11 +96,14 @@ class HloFusionInstructionAdaptor {
   virtual const HloInstruction& FusionInstruction() const = 0;
   virtual absl::InlinedVector<HloInstructionAdaptor, 2>
   MakeInstructionPostOrder() const = 0;
+  virtual void ForEach(
+      const std::function<void(HloInstructionAdaptor)>& fn) const = 0;
   virtual std::string ToString() const = 0;
 };
 
 }  // namespace internal
 
+// Treats a set of HloInstructions as if they were fused.
 class HloFusionAdaptor {
  public:
   bool ContainsInstruction(HloInstructionAdaptor instruction) const;
@@ -108,6 +112,10 @@ class HloFusionAdaptor {
   absl::InlinedVector<const HloInstruction*, 2> GetParameters() const;
   absl::InlinedVector<HloInstructionAdaptor, 2> MakeInstructionPostOrder()
       const;
+
+  // Calls `fn` for each instruction in the fusion.
+  void ForEach(const std::function<void(HloInstructionAdaptor)>& fn) const;
+
   std::string ToString() const;
 
   static std::unique_ptr<HloFusionAdaptor> ForInstruction(
@@ -118,6 +126,10 @@ class HloFusionAdaptor {
       const HloComputation* computation);
 
  private:
+  HloFusionAdaptor() = default;
+  HloFusionAdaptor(const HloFusionAdaptor&) = delete;
+  HloFusionAdaptor& operator=(const HloFusionAdaptor&) = delete;
+
   void AddInstruction(const HloInstruction* instruction);
   void AddComputation(const HloComputation* computation);
 
@@ -141,9 +153,7 @@ void HloBfsConsumersFirstTraversal(
     absl::Span<const HloInstructionAdaptor> roots,
     const HloFusionAdaptor& fusion,
     const std::function<TraversalResult(HloInstructionAdaptor node)>&
-        visit_node,
-    const std::function<void(HloInstructionAdaptor producer)>& visit_arg =
-        [](HloInstructionAdaptor) {});
+        visit_node);
 
 // Visit the HLO nodes starting from `producers` in BFS order following the
 // `user` edges. Each node will be visited exactly once.
@@ -157,24 +167,24 @@ void HloBfsProducersFirstTraversal(
 // of `visit` for any of nodes is true. Uses the same order as
 // `HloBfsConsumersFirstTraversal` if `visit_operands` is true. Otherwise the
 // same order as `HloBfsProducersFirstTraversal` is used.
-bool HloAnyOf(absl::Span<const HloInstructionAdaptor> roots,
-              const HloFusionAdaptor& fusion,
-              const std::function<bool(HloInstructionAdaptor node)>& visit,
-              bool visit_operands = true);
+bool HloBfsAnyOf(absl::Span<const HloInstructionAdaptor> roots,
+                 const HloFusionAdaptor& fusion,
+                 const std::function<bool(HloInstructionAdaptor node)>& visit,
+                 bool visit_operands = true);
 
 // Visit the HLO nodes starting from `roots`, returning true if the return value
 // of `visit` for any of nodes is true. If `visit_operands` is true, the
 // search is going towards the operands, otherwise towards the users. Doesn't
 // require instruction and fusion adaptors.
-bool HloAnyOf(absl::Span<const HloInstruction* const> roots,
-              const std::function<bool(const HloInstruction* node)>& visit,
-              bool visit_operands = true);
+bool HloBfsAnyOf(absl::Span<const HloInstruction* const> roots,
+                 const std::function<bool(const HloInstruction* node)>& visit,
+                 bool visit_operands = true);
 
 // Visit the HLO nodes starting from `roots`, returning the first
 // node for which `visit` returns true, or `nullopt` if no node matches. Uses
 // the same order as `HloBfsConsumersFirstTraversal` if `visit_operands` is
 // true. Otherwise the same order as `HloBfsProducersFirstTraversal` is used.
-std::optional<HloInstructionAdaptor> HloFindIf(
+std::optional<HloInstructionAdaptor> HloBfsFindIf(
     absl::Span<const HloInstructionAdaptor> roots,
     const HloFusionAdaptor& fusion,
     const std::function<bool(HloInstructionAdaptor node)>& visit,
@@ -184,7 +194,7 @@ std::optional<HloInstructionAdaptor> HloFindIf(
 // search is going towards the operands, otherwise towards the users. Returns
 // the first node for which `visit` returns true, or `nullopt` if no node
 // matches.
-std::optional<const HloInstruction*> HloFindIf(
+std::optional<const HloInstruction*> HloBfsFindIf(
     absl::Span<const HloInstruction* const> roots,
     const std::function<bool(const HloInstruction* node)>& visit,
     bool visit_operands = true);
@@ -193,10 +203,22 @@ std::optional<const HloInstruction*> HloFindIf(
 // search is going towards the operands, otherwise towards the users. Returns
 // all nodes for which `visit` returns true. If no node matches, returns an
 // empty vector.
-std::vector<const HloInstruction*> HloFindAll(
+std::vector<const HloInstruction*> HloBfsFindAll(
     absl::Span<const HloInstruction* const> roots,
     const std::function<bool(const HloInstruction* node)>& visit,
     bool visit_operands = true);
+
+// Returns true if any instruction in the fusion adaptor matches the predicate.
+template <typename Pred>
+bool HloAnyOf(const HloFusionAdaptor& fusion, Pred&& pred) {
+  bool is_any = false;
+  fusion.ForEach([&](HloInstructionAdaptor node) {
+    if (pred(node)) {
+      is_any = true;
+    }
+  });
+  return is_any;
+}
 
 // Find a use chain from `parent` to `root`. Empty if no chain exists.
 // `[parent]` if `parent` is `root`.

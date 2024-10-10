@@ -29,15 +29,16 @@ limitations under the License.
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
-#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
-#include "xla/client/xla_computation.h"
+#include "unsupported/Eigen/CXX11/Tensor"
+#include "mlir/IR/BuiltinOps.h"
 #include "xla/executable_run_options.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/layout.h"
 #include "xla/literal.h"
@@ -383,9 +384,6 @@ class TfrtCpuClient final : public PjRtClient {
   absl::StatusOr<ChannelHandle> CreateDeviceToHostChannelHandle() override {
     return Unimplemented("CreateDeviceToHostChannelHandle not implemented.");
   }
-  absl::StatusOr<ChannelHandle> CreateHostToDeviceChannelHandle() override {
-    return Unimplemented("CreateHostToDeviceChannelHandle not implemented.");
-  }
 
   absl::Status Defragment() override {
     return Unimplemented("Defragment not implemented.");
@@ -445,13 +443,13 @@ class TfrtCpuClient final : public PjRtClient {
   // Pointers to `owned_memory_spaces_`.
   std::vector<PjRtMemorySpace*> memory_spaces_;
 
-  // Thread pool for running PjRtClient tasks.
-  std::unique_ptr<tsl::thread::ThreadPool> pjrt_client_thread_pool_;
-  std::unique_ptr<AsyncWorkRunner> async_work_runner_;
-
   // TODO(zhangqiaorjc): Use tsl::compat::EigenHostContextThreadPool.
   std::unique_ptr<tsl::thread::ThreadPool> eigen_intraop_pool_;
   std::unique_ptr<Eigen::ThreadPoolDevice> eigen_intraop_device_;
+
+  // Thread pool for running PjRtClient tasks.
+  std::unique_ptr<tsl::thread::ThreadPool> pjrt_client_thread_pool_;
+  std::unique_ptr<AsyncWorkRunner> async_work_runner_;
 
   // Launching collectives are prone to deadlock when we use fixed-sized
   // threadpools since ExecuteHelper will block until all replicas reach the
@@ -588,7 +586,7 @@ class TfrtCpuExecutable final : public PjRtLoadedExecutable {
     }
     memory_stats.serialized_hlo_proto = proto->SerializeAsString();
     memory_stats.PopulateBufferStatsFromAllocations(
-        cpu_executable_.get()->GetAllocations());
+        cpu_executable_->GetAllocations());
     return memory_stats;
   }
 

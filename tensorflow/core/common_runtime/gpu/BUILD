@@ -1,4 +1,5 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@local_xla//xla/tsl:tsl.bzl", "if_cuda_libs")
 load(
     "//tensorflow:tensorflow.bzl",
     "clean_dep",
@@ -140,6 +141,19 @@ filegroup(
     visibility = ["//visibility:private"],
 )
 
+cc_library(
+    name = "gpu_runtime_hermetic_cuda_deps",
+    visibility = ["//visibility:public"],
+    deps = if_cuda_libs([
+        "@local_xla//xla/tsl/cuda:cudart",
+        "@local_xla//xla/tsl/cuda:cublas",
+        "@local_xla//xla/tsl/cuda:cufft",
+        "@local_xla//xla/tsl/cuda:cusolver",
+        "@local_xla//xla/tsl/cuda:cusparse",
+        "@local_xla//xla/tsl/cuda:cudnn",
+    ]),
+)
+
 tf_cuda_library(
     name = "gpu_runtime_impl",
     srcs = [
@@ -158,6 +172,8 @@ tf_cuda_library(
         "@local_config_cuda//cuda:cudnn_header",
         "@local_xla//xla/stream_executor/cuda:cuda_platform",
         "@local_xla//xla/stream_executor/gpu:gpu_stream",
+        "@local_xla//xla/stream_executor/gpu:gpu_cudamallocasync_allocator",
+        ":gpu_runtime_hermetic_cuda_deps",
     ],
     defines = if_linux_x86_64(["TF_PLATFORM_LINUX_X86_64"]),
     features = ["-layering_check"],
@@ -187,8 +203,8 @@ tf_cuda_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@local_xla//xla/stream_executor",
-        "@local_xla//xla/stream_executor/gpu:gpu_cudamallocasync_allocator",
         "@local_xla//xla/stream_executor/gpu:gpu_init_impl",
+        "@local_xla//xla/stream_executor/gpu:scoped_activate_context",
         "@local_xla//xla/tsl/framework:device_id_utils",
     ] + if_google(
         # TODO(b/282068262): PJRT pulls in TFRT components that are incompatible with ARM platform.
@@ -214,7 +230,9 @@ tf_cuda_library(
         }) + if_cuda_or_rocm([
             "@local_xla//xla/service:gpu_plugin_impl",  # for registering cuda compiler.
         ]),
-    ),
+    ) + if_cuda_or_rocm([
+        "@local_tsl//tsl/platform:dso_loader",
+    ]),
     alwayslink = 1,
 )
 
@@ -326,7 +344,7 @@ tf_cuda_cc_test(
         "//tensorflow/core/common_runtime:core_cpu_internal",
         "//tensorflow/core/common_runtime:direct_session_internal",
         "//tensorflow/core/kernels:ops_util",
-        "@local_xla//xla/stream_executor/gpu:gpu_cudamallocasync_allocator_header",
+        "@local_xla//xla/stream_executor/gpu:gpu_cudamallocasync_allocator",
         "@local_xla//xla/tests:test_macros_header",
         "@local_xla//xla/tsl/framework:device_id",
     ],
@@ -388,7 +406,7 @@ tf_cuda_cc_test(
         "//tensorflow/core/common_runtime:core_cpu_internal",
         "//tensorflow/core/common_runtime:direct_session_internal",
         "//tensorflow/core/kernels:ops_util",
-        "@local_xla//xla/stream_executor/gpu:gpu_cudamallocasync_allocator_header",
+        "@local_xla//xla/stream_executor/gpu:gpu_cudamallocasync_allocator",
         "@local_xla//xla/tests:test_macros_header",
     ],
 )

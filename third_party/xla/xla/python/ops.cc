@@ -24,24 +24,24 @@ limitations under the License.
 #include <vector>
 
 #include "absl/types/span.h"
-#include "third_party/nanobind/include/nanobind/nanobind.h"
-#include "third_party/nanobind/include/nanobind/stl/optional.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/pair.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/shared_ptr.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/string.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/tuple.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/vector.h"  // IWYU pragma: keep
-#include "xla/client/lib/approx_topk.h"
-#include "xla/client/lib/approx_topk_shape.h"
-#include "xla/client/lib/comparators.h"
-#include "xla/client/lib/lu_decomposition.h"
-#include "xla/client/lib/math.h"
-#include "xla/client/lib/qr.h"
-#include "xla/client/lib/self_adjoint_eig.h"
-#include "xla/client/lib/sorting.h"
-#include "xla/client/lib/svd.h"
-#include "xla/client/xla_builder.h"
-#include "xla/client/xla_computation.h"
+#include "nanobind/nanobind.h"
+#include "nanobind/stl/optional.h"  // IWYU pragma: keep
+#include "nanobind/stl/pair.h"  // IWYU pragma: keep
+#include "nanobind/stl/shared_ptr.h"  // IWYU pragma: keep
+#include "nanobind/stl/string.h"  // IWYU pragma: keep
+#include "nanobind/stl/tuple.h"  // IWYU pragma: keep
+#include "nanobind/stl/vector.h"  // IWYU pragma: keep
+#include "xla/hlo/builder/lib/approx_topk.h"
+#include "xla/hlo/builder/lib/approx_topk_shape.h"
+#include "xla/hlo/builder/lib/comparators.h"
+#include "xla/hlo/builder/lib/lu_decomposition.h"
+#include "xla/hlo/builder/lib/math.h"
+#include "xla/hlo/builder/lib/qr.h"
+#include "xla/hlo/builder/lib/self_adjoint_eig.h"
+#include "xla/hlo/builder/lib/sorting.h"
+#include "xla/hlo/builder/lib/svd.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/pjrt/status_casters.h"
 #include "xla/python/nb_absl_span.h"  // IWYU pragma: keep
 #include "xla/python/nb_helpers.h"
@@ -297,7 +297,7 @@ void BuildOpsSubmodule(nb::module_& m) {
       .value("TRANSPOSE", TriangularSolveOptions::TRANSPOSE)
       .value("ADJOINT", TriangularSolveOptions::ADJOINT);
 
-  nb::enum_<RandomAlgorithm>(ops, "RandomAlgorithm")
+  nb::enum_<RandomAlgorithm>(ops, "RandomAlgorithm", nb::is_arithmetic())
       .value("RNG_DEFAULT", RandomAlgorithm::RNG_DEFAULT)
       .value("RNG_THREE_FRY", RandomAlgorithm::RNG_THREE_FRY)
       .value("RNG_PHILOX", RandomAlgorithm::RNG_PHILOX);
@@ -307,7 +307,8 @@ void BuildOpsSubmodule(nb::module_& m) {
       .value("SCHEDULE_LATEST", CustomCallSchedule::SCHEDULE_LATEST)
       .value("SCHEDULE_EARLIEST", CustomCallSchedule::SCHEDULE_EARLIEST);
 
-  nb::enum_<CustomCallApiVersion>(ops, "CustomCallApiVersion")
+  nb::enum_<CustomCallApiVersion>(ops, "CustomCallApiVersion",
+                                  nb::is_arithmetic())
       .value("API_VERSION_ORIGINAL", CustomCallApiVersion::API_VERSION_ORIGINAL)
       .value("API_VERSION_STATUS_RETURNING",
              CustomCallApiVersion::API_VERSION_STATUS_RETURNING)

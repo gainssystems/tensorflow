@@ -31,7 +31,7 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
-#include "third_party/nanobind/include/nanobind/nanobind.h"
+#include "nanobind/nanobind.h"
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/python/nb_helpers.h"
 #include "xla/python/py_values.h"
@@ -134,7 +134,7 @@ H AbslHashValue(H h, const ArgumentSignature& s) {
     const auto& static_arg = s.static_args[i];
     Py_hash_t hash;
     try {
-      hash = xla::nb_hash(static_arg);
+      hash = nanobind::hash(static_arg);
     } catch (const nanobind::python_error& e) {
       if (!e.matches(PyExc_TypeError)) throw;
       throw std::invalid_argument(absl::StrCat(

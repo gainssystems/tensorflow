@@ -34,27 +34,29 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
-#include "third_party/nanobind/include/nanobind/nanobind.h"
-#include "third_party/nanobind/include/nanobind/ndarray.h"
-#include "third_party/nanobind/include/nanobind/stl/optional.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/pair.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/shared_ptr.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/string.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/string_view.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/variant.h"  // IWYU pragma: keep
-#include "third_party/nanobind/include/nanobind/stl/vector.h"  // IWYU pragma: keep
+#include "nanobind/nanobind.h"
+#include "nanobind/ndarray.h"
+#include "nanobind/stl/optional.h"  // IWYU pragma: keep
+#include "nanobind/stl/pair.h"  // IWYU pragma: keep
+#include "nanobind/stl/shared_ptr.h"  // IWYU pragma: keep
+#include "nanobind/stl/string.h"  // IWYU pragma: keep
+#include "nanobind/stl/string_view.h"  // IWYU pragma: keep
+#include "nanobind/stl/variant.h"  // IWYU pragma: keep
+#include "nanobind/stl/vector.h"  // IWYU pragma: keep
 #include "xla/array.h"
 #include "xla/client/executable_build_options.h"
-#include "xla/client/xla_builder.h"
-#include "xla/client/xla_computation.h"
 #include "xla/debug_options_flags.h"
 #include "xla/ffi/api/c_api.h"
 #include "xla/ffi/ffi.h"
 #include "xla/ffi/ffi_api.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/hlo/ir/hlo_module_group.h"
 #include "xla/hlo/ir/hlo_sharding.h"
+#include "xla/hlo/parser/hlo_parser.h"
+#include "xla/hlo/pass/hlo_pass_interface.h"
 #include "xla/layout.h"
 #include "xla/layout_util.h"
 #include "xla/literal.h"
@@ -74,16 +76,14 @@ limitations under the License.
 #include "xla/service/hlo_dce.h"
 #include "xla/service/hlo_graph_dumper.h"
 #include "xla/service/hlo_module_config.h"
-#include "xla/service/hlo_parser.h"
-#include "xla/service/hlo_pass_interface.h"
 #include "xla/service/name_uniquer.h"
 #include "xla/service/tuple_simplifier.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
+#include "xla/tsl/lib/strings/proto_serialization.h"
 #include "xla/util.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/lib/strings/proto_serialization.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
@@ -354,13 +354,14 @@ absl::Status PyRegisterCustomCallTarget(const std::string& fn_name,
         return reinterpret_cast<XLA_FFI_Handler*>(capsule.data());
       };
 
-      TF_ASSIGN_OR_RETURN(XLA_FFI_Handler * prepare, handler("prepare"));
-      TF_ASSIGN_OR_RETURN(XLA_FFI_Handler * initialize, handler("initialize"));
-      TF_ASSIGN_OR_RETURN(XLA_FFI_Handler * execute, handler("execute"));
+      XLA_FFI_Handler_Bundle bundle;
+      TF_ASSIGN_OR_RETURN(bundle.instantiate, handler("instantiate"));
+      TF_ASSIGN_OR_RETURN(bundle.prepare, handler("prepare"));
+      TF_ASSIGN_OR_RETURN(bundle.initialize, handler("initialize"));
+      TF_ASSIGN_OR_RETURN(bundle.execute, handler("execute"));
 
       return ffi::TakeStatus(ffi::Ffi::RegisterStaticHandler(
-          xla::ffi::GetXlaFfiApi(), fn_name, platform,
-          XLA_FFI_Handler_Bundle{prepare, initialize, execute}, traits));
+          xla::ffi::GetXlaFfiApi(), fn_name, platform, bundle, traits));
     }
 
     return absl::InvalidArgumentError(
@@ -391,6 +392,27 @@ void DefRepeatedProperty(nb::class_<T>& cls, const char* name,
         elems->Reserve(new_elems.size());
         for (typename Container::value_type& e : new_elems) {
           elems->Add(std::move(e));
+        }
+      });
+}
+
+template <typename T, typename Container>
+void DefRepeatedEnumProperty(nb::class_<T>& cls, const char* name,
+                             Container* (T::*getter)()) {
+  cls.def_prop_rw(
+      name,
+      [getter](T& obj) {
+        Container* elems = (obj.*getter)();
+        std::vector<typename Container::value_type> result;
+        result.reserve(elems->size());
+        std::copy(elems->begin(), elems->end(), std::back_inserter(result));
+        return result;
+      },
+      [getter](T& obj, nb::sequence new_elems) {
+        Container* elems = (obj.*getter)();
+        elems->Clear();
+        for (nb::handle e : new_elems) {
+          elems->Add(nb::cast<int>(e.attr("value")));
         }
       });
 }
@@ -1025,8 +1047,10 @@ void BuildXlaCompilerSubmodule(nb::module_& m) {
           targets[nb::str(name.data(), name.size())] = nb::capsule(target);
         }
 
-        for (const auto& [name, registration] :
-             ffi::StaticRegisteredHandlers(platform)) {
+        auto ffi_handlers = ffi::StaticRegisteredHandlers(platform);
+        if (!ffi_handlers.ok()) return targets;
+
+        for (const auto& [name, registration] : *ffi_handlers) {
           nb::dict bundle;
           auto export_handler = [&](std::string_view name, XLA_FFI_Handler* h) {
             if (h != nullptr) {
@@ -1175,6 +1199,20 @@ void BuildXlaCompilerSubmodule(nb::module_& m) {
                    &DebugOptions::xla_gpu_dump_autotune_logs_to,
                    [](DebugOptions* self, std::string value) {
                      self->set_xla_gpu_dump_autotune_logs_to(value);
+                   })
+      .def_prop_rw("xla_gpu_kernel_cache_file",
+                   &DebugOptions::xla_gpu_kernel_cache_file,
+                   [](DebugOptions* self, std::string value) {
+                     self->set_xla_gpu_kernel_cache_file(value);
+                   })
+      .def_prop_rw(
+          "xla_gpu_enable_llvm_module_compilation_parallelism",
+          &DebugOptions::xla_gpu_enable_llvm_module_compilation_parallelism,
+          &DebugOptions::set_xla_gpu_enable_llvm_module_compilation_parallelism)
+      .def_prop_rw("xla_gpu_per_fusion_autotune_cache_dir",
+                   &DebugOptions::xla_gpu_per_fusion_autotune_cache_dir,
+                   [](DebugOptions* self, std::string value) {
+                     self->set_xla_gpu_per_fusion_autotune_cache_dir(value);
                    });
 
   nb::class_<ExecutableBuildOptions>(m, "ExecutableBuildOptions")
@@ -1249,9 +1287,13 @@ void BuildXlaCompilerSubmodule(nb::module_& m) {
           [](ExecutableBuildOptions& options, std::vector<bool> values) {
             absl::InlinedVector<bool, 1> v(values.begin(), values.end());
             options.set_allow_spmd_sharding_propagation_to_output(v);
-          });
+          })
+      .def_prop_rw("use_shardy_partitioner",
+                   &ExecutableBuildOptions::use_shardy_partitioner,
+                   &ExecutableBuildOptions::set_use_shardy_partitioner);
 
-  nb::enum_<OpSharding::Type> op_sharding_type(m, "OpSharding_Type");
+  nb::enum_<OpSharding::Type> op_sharding_type(m, "OpSharding_Type",
+                                               nb::is_arithmetic());
   op_sharding_type.value("REPLICATED", OpSharding::REPLICATED)
       .value("MAXIMAL", OpSharding::MAXIMAL)
       .value("MANUAL", OpSharding::MANUAL)
@@ -1319,8 +1361,8 @@ void BuildXlaCompilerSubmodule(nb::module_& m) {
                       &xla::OpSharding::mutable_iota_transpose_perm);
   DefRepeatedProperty(op_sharding, "tuple_shardings",
                       &xla::OpSharding::mutable_tuple_shardings);
-  DefRepeatedProperty(op_sharding, "last_tile_dims",
-                      &xla::OpSharding::mutable_last_tile_dims);
+  DefRepeatedEnumProperty(op_sharding, "last_tile_dims",
+                          &xla::OpSharding::mutable_last_tile_dims);
 
   nb::class_<HloSharding> hlo_sharding(m, "HloSharding");
   hlo_sharding

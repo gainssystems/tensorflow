@@ -291,13 +291,17 @@ cc_test(
     deps = [
         ":list_ops_subgraph_test_util",
         ":tensor_array",
+        "//tensorflow/lite:array",
         "//tensorflow/lite:interpreter_test_util",
         "//tensorflow/lite:util",
         "//tensorflow/lite/c:c_api_types",
         "//tensorflow/lite/c:common",
         "//tensorflow/lite/kernels:kernel_util",
+        "//tensorflow/lite/kernels:op_macros",
         "//tensorflow/lite/kernels:test_util",
+        "//tensorflow/lite/kernels/internal:compatibility",
         "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -308,9 +312,11 @@ cc_library(
     srcs = ["tensor_array.cc"],
     hdrs = ["tensor_array.h"],
     compatible_with = get_compatible_with_portable(),
-    visibility = ["//tensorflow/lite:__subpackages__"],
+    visibility = ["//visibility:private"],
     deps = [
+        "//tensorflow/lite:array",
         "//tensorflow/lite:util",
+        "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/c:common",
     ],
 )
@@ -320,6 +326,7 @@ cc_test(
     srcs = ["tensor_array_test.cc"],
     deps = [
         ":tensor_array",
+        "//tensorflow/lite:array",
         "//tensorflow/lite:type_to_tflitetype",
         "//tensorflow/lite:util",
         "//tensorflow/lite/c:c_api_types",

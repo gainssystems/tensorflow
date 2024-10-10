@@ -17,7 +17,6 @@ limitations under the License.
 
 #include <memory>
 #include <string>
-#include <utility>
 
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -25,13 +24,12 @@ limitations under the License.
 #include "xla/tsl/distributed_runtime/coordination/coordination_service.h"
 #include "xla/tsl/distributed_runtime/rpc/async_service_interface.h"
 #include "xla/tsl/distributed_runtime/rpc/coordination/grpc_coordination_service_impl.h"
+#include "xla/tsl/protobuf/coordination_config.pb.h"
 #include "xla/util.h"
 #include "tsl/platform/env.h"
 #include "tsl/platform/threadpool.h"
-#include "tsl/protobuf/coordination_config.pb.h"
 
 namespace {
-constexpr int kBarrierTimedOut = -1000;
 
 std::unique_ptr<tsl::CoordinationServiceInterface> EnableCoordinationService(
     const xla::CoordinationServiceImpl::Options& options) {

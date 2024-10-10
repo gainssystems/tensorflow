@@ -17,6 +17,7 @@ limitations under the License.
 #include "xla/layout.h"
 #include "xla/layout_util.h"
 #include "xla/literal_util.h"
+#include "xla/service/service.h"
 #include "xla/shape.h"
 #ifndef _WIN32
 #include <unistd.h>
@@ -24,11 +25,10 @@ limitations under the License.
 
 #include <memory>
 
-#include "xla/client/global_data.h"
-#include "xla/client/lib/arithmetic.h"
 #include "xla/client/local_client.h"
-#include "xla/client/xla_builder.h"
-#include "xla/client/xla_computation.h"
+#include "xla/hlo/builder/lib/arithmetic.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
 #include "xla/literal.h"
 #include "xla/shape_util.h"
 #include "xla/test_helpers.h"

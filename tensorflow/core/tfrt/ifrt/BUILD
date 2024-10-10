@@ -30,6 +30,7 @@ cc_library(
     srcs = ["ifrt_serving_core_selector.cc"],
     hdrs = ["ifrt_serving_core_selector.h"],
     deps = [
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
@@ -51,18 +52,82 @@ tf_cc_test(
 )
 
 cc_library(
+    name = "grid",
+    srcs = ["grid.cc"],
+    hdrs = ["grid.h"],
+    deps = [
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_library(
+    name = "ifrt_device_utils",
+    srcs = ["ifrt_device_utils.cc"],
+    hdrs = ["ifrt_device_utils.h"],
+    deps = [
+        ":grid",
+        ":ifrt_config_proto_cc",
+        "//tensorflow/compiler/tf2xla:host_compute_metadata_proto_cc",
+        "//tensorflow/compiler/tf2xla:xla_helpers",
+        "//tensorflow/core:core_cpu_base",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core/protobuf/tpu:compile_metadata_proto_cc",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_xla//xla:xla_data_proto_cc",
+        "@local_xla//xla/python/ifrt",
+        "@local_xla//xla/python/ifrt:attribute_map",
+        "@local_xla//xla/service:computation_placer_hdr",
+    ],
+)
+
+tf_cc_test(
+    name = "ifrt_device_utils_test",
+    srcs = [
+        "ifrt_device_utils_test.cc",
+    ],
+    tags = ["no_oss"],
+    deps = [
+        ":ifrt_device_utils",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_xla//xla/python/ifrt",
+        "@local_xla//xla/python/ifrt:attribute_map",
+        "@local_xla//xla/python/ifrt:mock",
+        "@local_xla//xla/service:computation_placer_hdr",
+    ],
+)
+
+cc_library(
     name = "ifrt_serving_executable",
     srcs = ["ifrt_serving_executable.cc"],
     hdrs = ["ifrt_serving_executable.h"],
     deps = [
         ":ifrt_config_proto_cc",
+        ":ifrt_device_utils",
         ":ifrt_loaded_variable_registry",
         ":ifrt_loaded_variable_utils",
+        ":ifrt_persistent_compilation_cache",
         ":ifrt_restore_tensor_registry",
         ":ifrt_serving_core_selector",
         ":ifrt_tensor_utils",
         ":sharding_utils",
         ":tf_host_callback",
+        "//tensorflow/compiler/mlir/tensorflow:dump_mlir_util",
         "//tensorflow/compiler/mlir/tfrt:export",
         "//tensorflow/compiler/mlir/tfrt/transforms/ifrt:extract_callback",
         "//tensorflow/compiler/mlir/tfrt/transforms/ifrt:ifrt_types",
@@ -85,7 +150,10 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
@@ -144,6 +212,21 @@ cc_library(
 )
 
 cc_library(
+    name = "ifrt_persistent_compilation_cache",
+    srcs = ["ifrt_persistent_compilation_cache.cc"],
+    hdrs = ["ifrt_persistent_compilation_cache.h"],
+    deps = [
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@local_xla//xla/pjrt:pjrt_executable",
+        "@local_xla//xla/python/ifrt",
+        "@local_xla//xla/python/ifrt/hlo:hlo_program",
+        "@local_xla//xla/tsl/concurrency:ref_count",
+    ],
+)
+
+cc_library(
     name = "ifrt_loaded_variable_registry",
     srcs = ["ifrt_loaded_variable_registry.cc"],
     hdrs = ["ifrt_loaded_variable_registry.h"],
@@ -158,8 +241,18 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@local_tsl//tsl/platform:statusor",
+        "@local_xla//xla/hlo/ir:hlo",
         "@local_xla//xla/python/ifrt",
         "@local_xla//xla/tsl/concurrency:ref_count",
+    ],
+)
+
+cc_library(
+    name = "ifrt_model_restore_context",
+    hdrs = ["ifrt_model_restore_context.h"],
+    deps = [
+        ":checkpoint_loader",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -170,6 +263,7 @@ cc_library(
     deps = [
         ":ifrt_executable_registry",
         ":ifrt_loaded_variable_registry",
+        ":ifrt_persistent_compilation_cache",
         ":ifrt_restore_tensor_registry",
         ":ifrt_serving_core_selector",
         "//tensorflow/compiler/tf2xla:xla_helpers",
@@ -200,10 +294,9 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:statusor",
-        "@local_xla//xla:shape_util",
         "@local_xla//xla:xla_data_proto_cc",
         "@local_xla//xla/python/ifrt",
-        "@local_xla//xla/python/pjrt_ifrt",
+        "@local_xla//xla/python/pjrt_ifrt:pjrt_dtype",
     ],
 )
 
@@ -253,7 +346,6 @@ cc_library(
         ":sharding_utils",
         "//tensorflow/compiler/mlir/tfrt/transforms/ifrt:ifrt_types",
         "//tensorflow/core:framework",
-        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -284,6 +376,7 @@ cc_library(
         "//tensorflow/core/common_runtime/eager:context",
         "//tensorflow/core/common_runtime/eager:core_no_xla",
         "//tensorflow/core/common_runtime/eager:tensor_handle",
+        "//tensorflow/core/framework:function_proto_cc",
         "//tensorflow/core/protobuf:for_core_protos_cc",
         "@com_google_absl//absl/cleanup",
         "@com_google_absl//absl/container:fixed_array",
@@ -348,10 +441,10 @@ tf_cc_test(
         "//tensorflow/core/framework:types_proto_cc",
         "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_xla//xla/python/ifrt",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
     ],
 )
 
@@ -371,16 +464,17 @@ tf_cc_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:env",
         "@local_tsl//tsl/platform:status_matchers",
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test",
         "@local_xla//xla:xla_data_proto_cc",
+        "@local_xla//xla/hlo/ir:hlo",
         "@local_xla//xla/python/ifrt",
         "@local_xla//xla/python/ifrt:test_util",
         "@local_xla//xla/python/pjrt_ifrt:tfrt_cpu_client_test_lib",
         "@local_xla//xla/tsl/concurrency:ref_count",
+        "@local_xla//xla/tsl/lib/core:status_test_util",
         "@tf_runtime//:hostcontext",
     ],
 )
@@ -427,6 +521,7 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core/framework:tensor_matcher",
         "//tensorflow/core/framework:tensor_testutil",
+        "//tensorflow/core/framework:types_proto_cc",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
@@ -533,5 +628,42 @@ tf_cc_test(
         "@tf_runtime//:test_kernels_alwayslink",
         "@tf_runtime//backends/cpu:core_runtime_alwayslink",
         "@tf_runtime//backends/cpu:tf_ops_alwayslink",
+    ],
+)
+
+cc_library(
+    name = "checkpoint_loader",
+    srcs = ["checkpoint_loader.cc"],
+    hdrs = ["checkpoint_loader.h"],
+    deps = [
+        ":ifrt_loaded_variable_registry",
+        ":ifrt_loaded_variable_utils",
+        ":ifrt_restore_tensor_registry",
+        "//tensorflow/compiler/mlir/tfrt/transforms/ifrt:ifrt_types",
+        "//tensorflow/core:framework",
+        "//tensorflow/core/common_runtime:function",
+        "//tensorflow/core/framework:attr_value_proto_cc",
+        "//tensorflow/core/framework:node_def_util",
+        "//tensorflow/core/framework:tensor",
+        "//tensorflow/core/framework:types_proto_cc",
+        "//tensorflow/core/tfrt/fallback:op_kernel_runner",
+        "//tensorflow/core/tfrt/mlrt/bytecode",
+        "//tensorflow/core/tfrt/mlrt/kernel:context",
+        "//tensorflow/core/tfrt/mlrt/kernel:kernel_runner_utils",
+        "//tensorflow/core/tfrt/mlrt/kernel:shard_restore_util",
+        "//tensorflow/core/tfrt/utils:fallback_tensor",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@llvm-project//mlir:IR",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
+        "@local_tsl//tsl/platform:tstring",
+        "@local_xla//xla/python/ifrt",
+        "@tf_runtime//:hostcontext",
     ],
 )

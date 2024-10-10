@@ -27,9 +27,14 @@ limitations under the License.
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/client/executable_build_options.h"
 #include "xla/hlo/ir/hlo_module.h"
 #include "xla/literal.h"
+#include "xla/pjrt/distributed/key_value_store_interface.h"
 #include "xla/pjrt/pjrt_client.h"
+#include "xla/pjrt/pjrt_compiler.h"
+#include "xla/pjrt/pjrt_executable.h"
+#include "xla/shape.h"
 #include "xla/xla.pb.h"
 #include "tsl/platform/logging.h"
 #include "tsl/platform/statusor.h"
@@ -91,7 +96,11 @@ class FunctionalHloRunner {
     kStandardCompile
   };
 
-  enum class SpmdMode { kUseSpmdPartitioning, kNotUseSpmdPartitioning };
+  enum class SpmdMode : int8_t {
+    kUseSpmdPartitioning,    // Use the GSPMD partitioner for partitioning.
+    kUseShardyPartitioning,  // Use the Shardy partitioner for partitioning.
+    kNotUseSpmdPartitioning  // Do not perform partitioning.
+  };
 
   enum class SpmdPartitionedMode {
     kIsSpmdPartitionedModule,
@@ -194,6 +203,9 @@ class FunctionalHloRunner {
     // Whether to untuple the result of running HLO module into a vector of
     // arrays. If unprovided, use the default in ExecuteOptions.
     std::optional<bool> untuple_result = std::nullopt;
+    // Whether to use the layout on host when allocating buffers for arguments.
+    // Some platforms (e.g. CPU) do not support this yet.
+    bool use_argument_host_layout = false;
 
     // Should we log the inputs and outputs to stderr?
     bool log_input_output() const {
@@ -368,7 +380,7 @@ class FunctionalHloRunner {
   CopyArgumentsToDevice(PjRtClient& client,
                         const PjRtLoadedExecutable* executable,
                         const PerDeviceLiteralVecType& arguments,
-                        bool log_input, bool flattened_arguments,
+                        const RunningOptions& options, bool flattened_arguments,
                         bool clone_device0_arguments = false);
 
   static absl::StatusOr<PerDeviceLiteralVecType> RunInternal(

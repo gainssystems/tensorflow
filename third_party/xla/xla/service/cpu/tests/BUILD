@@ -41,6 +41,7 @@ cc_library(
 xla_cc_test(
     name = "cpu_aot_export_test",
     srcs = ["cpu_aot_export_test.cc"],
+    tags = ["test_xla_cpu_thunks"],
     deps = [
         "//xla/hlo/ir:hlo",
         "//xla/hlo/ir:hlo_module_group",
@@ -228,11 +229,11 @@ xla_cc_test(
         "//xla:shape_util",
         "//xla:test_helpers",
         "//xla:xla_data_proto_cc",
-        "//xla/client:global_data",
         "//xla/client:local_client",
-        "//xla/client:xla_builder",
-        "//xla/client:xla_computation",
-        "//xla/client/lib:arithmetic",
+        "//xla/hlo/builder:xla_builder",
+        "//xla/hlo/builder:xla_computation",
+        "//xla/hlo/builder/lib:arithmetic",
+        "//xla/service",
         "//xla/service:cpu_plugin",
         "//xla/tests:client_library_test_base",
         "//xla/tests:literal_test_util",
@@ -292,8 +293,8 @@ xla_cc_test(
         "//xla/service:hlo_module_config",
         "//xla/service/cpu:cpu_compiler",
         "//xla/service/cpu:test_header_helper",
+        "//xla/tsl/lib/core:status_test_util",
         "@com_google_absl//absl/status:statusor",
-        "@local_tsl//tsl/lib/core:status_test_util",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
@@ -306,9 +307,9 @@ xla_cc_test(
         ":cpu_codegen_test",
         "//xla:shape_util",
         "//xla:xla_data_proto_cc",
-        "//xla/client:xla_builder",
-        "//xla/client:xla_computation",
-        "//xla/client/lib:sorting",
+        "//xla/hlo/builder:xla_builder",
+        "//xla/hlo/builder:xla_computation",
+        "//xla/hlo/builder/lib:sorting",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_module_config",
         "//xla/service/cpu:cpu_compiler",
@@ -329,6 +330,7 @@ xla_cc_test(
         "//xla:xla_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service/cpu:cpu_compiler",
+        "//xla/service/cpu:simple_orc_jit",
         "//xla/tests:hlo_test_base",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/strings",
@@ -336,6 +338,7 @@ xla_cc_test(
         "@llvm-project//llvm:ARMCodeGen",  # fixdeps: keep
         "@llvm-project//llvm:Target",
         "@llvm-project//llvm:X86CodeGen",  # fixdeps: keep
+        "@local_tsl//tsl/platform:platform_port",
         "@local_tsl//tsl/platform:test",
         "@local_tsl//tsl/platform:test_main",
     ],
@@ -353,5 +356,89 @@ xla_cc_test(
         "@llvm-project//llvm:X86CodeGen",  # fixdeps: keep
         "@local_tsl//tsl/platform:statusor",
         "@local_tsl//tsl/platform:test_main",
+    ],
+)
+
+xla_cc_test(
+    name = "onednn_matmul_test",
+    srcs = ["onednn_matmul_test.cc"],
+    copts = tsl_copts(),
+    shard_count = 4,
+    tags = [
+        "no_oss",
+        "notap",
+    ],
+    deps = [
+        "//xla:literal",
+        "//xla:shape_util",
+        "//xla:test",
+        "//xla:test_helpers",
+        "//xla/hlo/utils:hlo_matchers",
+        "//xla/service:cpu_plugin",
+        "//xla/service/cpu:onednn_contraction_rewriter",
+        "//xla/service/cpu:onednn_util",
+        "//xla/tests:filecheck",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:test_macros_header",
+        "//xla/tests:xla_internal_test_main",
+        "@local_tsl//tsl/platform:platform_port",
+    ],
+)
+
+xla_cc_test(
+    name = "onednn_convolution_test",
+    srcs = ["onednn_convolution_test.cc"],
+    copts = tsl_copts(),
+    deps = [
+        "//xla:literal",
+        "//xla:shape_util",
+        "//xla:test",
+        "//xla:test_helpers",
+        "//xla/hlo/utils:hlo_matchers",
+        "//xla/service:cpu_plugin",
+        "//xla/service/cpu:onednn_contraction_rewriter",
+        "//xla/service/cpu:onednn_util",
+        "//xla/tests:filecheck",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:test_macros_header",
+        "//xla/tests:xla_internal_test_main",
+        "@local_tsl//tsl/platform:platform_port",
+    ],
+)
+
+xla_cc_test(
+    name = "onednn_layer_norm_test",
+    srcs = ["onednn_layer_norm_test.cc"],
+    copts = tsl_copts(),
+    deps = [
+        "//xla:test",
+        "//xla/service:cpu_plugin",
+        "//xla/service/cpu:onednn_util",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:xla_internal_test_main",
+    ],
+)
+
+xla_cc_test(
+    name = "onednn_softmax_test",
+    srcs = ["onednn_softmax_test.cc"],
+    copts = tsl_copts(),
+    shard_count = 4,
+    deps = [
+        "//xla:literal",
+        "//xla:shape_util",
+        "//xla:test",
+        "//xla:test_helpers",
+        "//xla/service:cpu_plugin",
+        "//xla/service:pattern_matcher",
+        "//xla/service:pattern_matcher_gmock",
+        "//xla/service/cpu:backend_config_proto_cc",
+        "//xla/service/cpu:onednn_config_proto_cc",
+        "//xla/service/cpu:onednn_ops_rewriter",
+        "//xla/service/cpu:onednn_util",
+        "//xla/tests:hlo_test_base",
+        "//xla/tests:test_macros_header",
+        "//xla/tests:xla_internal_test_main",
+        "@com_google_absl//absl/strings",
     ],
 )

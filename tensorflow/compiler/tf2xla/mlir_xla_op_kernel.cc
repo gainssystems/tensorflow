@@ -17,12 +17,30 @@ limitations under the License.
 
 #include <string>
 
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "tensorflow/compiler/jit/xla_compile_util.h"
 #include "tensorflow/compiler/mlir/tf2xla/api/v1/compile_mlir_util.h"
 #include "tensorflow/compiler/mlir/utils/array_container_utils.h"
+#include "tensorflow/compiler/tf2xla/xla_compiler.h"
+#include "tensorflow/compiler/tf2xla/xla_expression.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
-#include "tensorflow/core/framework/resource_op_kernel.h"
+#include "tensorflow/compiler/tf2xla/xla_op_registry.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "tensorflow/core/framework/device.h"
+#include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/op_requires.h"
+#include "tensorflow/core/framework/resource_base.h"
+#include "tensorflow/core/framework/resource_mgr.h"
+#include "tensorflow/core/framework/types.pb.h"
+#include "tensorflow/core/platform/errors.h"
+#include "tensorflow/core/platform/refcount.h"
+#include "tensorflow/core/platform/status.h"
+#include "tsl/platform/errors.h"
+#include "tsl/platform/statusor.h"
 
 namespace tensorflow {
 
@@ -135,7 +153,6 @@ Status MlirXlaOpKernel::ConstructXlaOp(XlaOpKernelContext* ctx) {
   core::ScopedUnref unref_ctx(ctx_res);
 
   // Compile the graph to HLO.
-  GraphDebugInfo debug_info;
   std::vector<xla::XlaOp> returns(1);
   auto build_hlo = [&](bool unconditionally_use_output_shapes) {
     return BuildHloFromGraph(
@@ -143,8 +160,7 @@ Status MlirXlaOpKernel::ConstructXlaOp(XlaOpKernelContext* ctx) {
         unconditionally_use_output_shapes,
         mlir::SpanToArrayRef<XlaCompiler::Argument>(xla_args), control_rets,
         device->device_type(),
-        *ctx->function_library()->GetFunctionLibraryDefinition(), debug_info,
-        {});
+        *ctx->function_library()->GetFunctionLibraryDefinition());
   };
 
   // Some of the operations that come through here do not know how to set their

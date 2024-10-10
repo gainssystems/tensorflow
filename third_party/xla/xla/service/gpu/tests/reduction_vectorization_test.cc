@@ -19,8 +19,8 @@ limitations under the License.
 
 #include "absl/strings/str_replace.h"
 #include "xla/error_spec.h"
+#include "xla/hlo/parser/hlo_parser.h"
 #include "xla/service/gpu/tests/gpu_codegen_test.h"
-#include "xla/service/hlo_parser.h"
 #include "xla/stream_executor/device_description.h"
 #include "tsl/platform/statusor.h"
 #include "tsl/platform/test.h"
@@ -107,6 +107,9 @@ CHECK: st.global.v2.f32
 }
 
 TEST_F(ReductionVectorizationTest, NoVectorizationForBlockSmallerThanWarpSize) {
+  if (GetDebugOptionsForTest().xla_gpu_mlir_emitter_level() >= 4) {
+    GTEST_SKIP() << "MLIR emitters can vectorize this";
+  }
   const char* hlo_text = R"(
 HloModule SlowModule
 

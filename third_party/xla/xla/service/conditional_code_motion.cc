@@ -38,11 +38,11 @@ limitations under the License.
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
+#include "xla/hlo/pass/hlo_pass_pipeline.h"
 #include "xla/literal.h"
 #include "xla/map_util.h"
 #include "xla/service/hlo_cse.h"
 #include "xla/service/hlo_dce.h"
-#include "xla/service/hlo_pass_pipeline.h"
 #include "xla/service/hlo_verifier.h"
 #include "xla/service/tuple_simplifier.h"
 #include "xla/shape.h"
@@ -1005,6 +1005,7 @@ class MoveOperandIntoBranch {
       CHECK_NE(new_tuple, nullptr);
       VLOG(5) << "Cloned new tuple:" << new_tuple->parent()->ToString() << "\n";
       std::vector<std::vector<HloInstruction*>> gte_users;
+      gte_users.reserve(branch_param->shape().tuple_shapes_size());
       for (int64_t j = 0; j < branch_param->shape().tuple_shapes_size(); ++j) {
         gte_users.push_back(std::vector<HloInstruction*>());
       }

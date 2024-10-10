@@ -15,7 +15,9 @@ limitations under the License.
 
 #include "xla/backends/profiler/gpu/cupti_collector.h"
 
+#include <optional>
 #include <queue>
+#include <string>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -26,15 +28,15 @@ limitations under the License.
 #include "third_party/gpus/cuda/extras/CUPTI/include/cupti_activity.h"
 #include "third_party/gpus/cuda/include/cuda.h"
 #include "third_party/gpus/cuda/include/cuda_occupancy.h"
+#include "xla/tsl/profiler/utils/parse_annotation.h"
+#include "xla/tsl/profiler/utils/trace_utils.h"
+#include "xla/tsl/profiler/utils/xplane_builder.h"
+#include "xla/tsl/profiler/utils/xplane_schema.h"
+#include "xla/tsl/profiler/utils/xplane_utils.h"
 #include "tsl/platform/abi.h"
 #include "tsl/platform/host_info.h"
 #include "tsl/platform/mem.h"
 #include "tsl/platform/mutex.h"
-#include "tsl/profiler/utils/parse_annotation.h"
-#include "tsl/profiler/utils/trace_utils.h"
-#include "tsl/profiler/utils/xplane_builder.h"
-#include "tsl/profiler/utils/xplane_schema.h"
-#include "tsl/profiler/utils/xplane_utils.h"
 
 namespace xla {
 namespace profiler {
@@ -157,6 +159,11 @@ class PerDeviceCollector {
     if (kernel_name.empty()) {
       kernel_name = GetTraceEventTypeName(event.type);
     }
+    // For CPU events like cuGraphLaunch(), add the graph id to the name.
+    if (event.graph_id != 0 && event.type == CuptiTracerEventType::CudaGraph &&
+        event.source == CuptiTracerEventSource::DriverCallback) {
+      absl::StrAppend(&kernel_name, " (CudaGraph:", event.graph_id, ")");
+    }
     XEventMetadata* event_metadata =
         plane->GetOrCreateEventMetadata(std::move(kernel_name));
     XEventBuilder xevent = line->AddEvent(*event_metadata);
@@ -273,13 +280,16 @@ class PerDeviceCollector {
                               StatType::kMemoryResidencyDetails)),
                           *plane->GetOrCreateStatMetadata(std::move(value)));
     } else if (event.type == CuptiTracerEventType::CudaGraph) {
-      if (event.cuda_graph_info.orig_graph_id) {
-        std::string value =
-            absl::StrCat("orig_graph_id:", event.cuda_graph_info.orig_graph_id);
-        VLOG(7) << "Add CudaGraph stat. " << value;
+      if (event.source == CuptiTracerEventSource::Activity) {
         xevent.AddStatValue(*plane->GetOrCreateStatMetadata(
-                                GetStatTypeStr(StatType::kCudaGraphDetails)),
-                            *plane->GetOrCreateStatMetadata(std::move(value)));
+                                GetStatTypeStr(StatType::kCudaGraphExecId)),
+                            event.graph_id);
+      } else {
+        if (event.cuda_graph_info.orig_graph_id) {
+          xevent.AddStatValue(*plane->GetOrCreateStatMetadata(
+                                  GetStatTypeStr(StatType::kCudaGraphOrigId)),
+                              event.cuda_graph_info.orig_graph_id);
+        }
       }
     }
 
@@ -312,6 +322,15 @@ class PerDeviceCollector {
     CUresult err = cuDeviceGetAttribute(&ret_val, attrib, device);
     if (err != CUDA_SUCCESS) return std::nullopt;
     return ret_val;
+  }
+
+  std::optional<std::string> GetDeviceName(CUdevice device) {
+    char device_name[512];
+    if (cuDeviceGetName(device_name, sizeof(device_name), device) !=
+        CUDA_SUCCESS) {
+      return std::nullopt;
+    }
+    return std::string(device_name);
   }
 
   std::string GetDeviceXLineName(
@@ -381,6 +400,13 @@ class PerDeviceCollector {
 
     CUdevice device;
     if (cuDeviceGet(&device, device_ordinal) != CUDA_SUCCESS) return;
+
+    std::optional<std::string> device_name = GetDeviceName(device);
+    if (device_name.has_value()) {
+      device_plane->AddStatValue(*device_plane->GetOrCreateStatMetadata(
+                                     GetStatTypeStr(StatType::kGpuDeviceName)),
+                                 *device_name);
+    }
 
     auto clock_rate_in_khz =
         GetDeviceAttribute(device, CU_DEVICE_ATTRIBUTE_CLOCK_RATE);
@@ -578,14 +604,15 @@ void CuptiTraceCollector::OnTracerCollectedCallbackData(
 }
 
 void CuptiTraceCollector::OnTracerCachedActivityBuffers(
-    std::unique_ptr<CuptiActivityBufferManager> activity_buffers) {
+    std::list<CuptiActivityBufferManager::ActivityBufferAndSize>
+        activity_buffers) {
   size_t dropped_activity_event_count = 0;
   CuptiEventCollectorDelegate collector(
       *annotation_map(),
       [this](CuptiTracerEvent&& ev) { this->AddEvent(std::move(ev)); });
-  activity_buffers->AddCachedActivityEventsTo(collector,
-                                              options_.max_activity_api_events,
-                                              dropped_activity_event_count);
+  AddActivityBufferListEventsTo(collector, activity_buffers,
+                                options_.max_activity_api_events,
+                                dropped_activity_event_count);
   if (dropped_activity_event_count > 0) {
     OnEventsDropped("total device(activity) events reaches max",
                     dropped_activity_event_count);
@@ -620,29 +647,9 @@ class CuptiTraceCollectorImpl : public CuptiTraceCollector {
     dropped_events_[reason] += num_events;
   }
 
-  void OnTracerCollectedCallbackData(
-      std::vector<CallbackAnnotationsAndEvents> callback_events,
-      bool need_callback_events) override {
-    callback_events_ = std::move(callback_events);
-    need_callback_events_ = need_callback_events;
-  }
-
-  void OnTracerCachedActivityBuffers(
-      std::unique_ptr<CuptiActivityBufferManager> activity_buffers) override {
-    activity_buffers_ = std::move(activity_buffers);
-  }
-
   void Flush() override {}
   // Returns true if some GPU events are captured.
   bool Export(XSpace* space, uint64_t end_gpu_ns) override {
-    // The callback API events must be processed before activity API buffers
-    // because the AnnotationMap is populated from the callback API events and
-    // queried by the activity API events.
-    CuptiTraceCollector::OnTracerCollectedCallbackData(
-        std::move(callback_events_), need_callback_events_);
-    CuptiTraceCollector::OnTracerCachedActivityBuffers(
-        std::move(activity_buffers_));
-
     LOG(INFO) << " GpuTracer has collected " << num_callback_events_
               << " callback api events and " << num_activity_events_
               << " activity events. " << ReportDroppedEvents();
@@ -693,8 +700,6 @@ class CuptiTraceCollectorImpl : public CuptiTraceCollector {
  private:
   size_t num_callback_events_ = 0;
   size_t num_activity_events_ = 0;
-  std::unique_ptr<CuptiActivityBufferManager> activity_buffers_;
-  std::vector<CallbackAnnotationsAndEvents> callback_events_;
   absl::flat_hash_map<std::string, uint64_t> dropped_events_;
   uint64_t start_walltime_ns_;
   uint64_t start_gpu_ns_;

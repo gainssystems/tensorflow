@@ -25,7 +25,6 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "xla/stream_executor/kernel.h"
-#include "xla/stream_executor/kernel_factory.h"
 #include "xla/stream_executor/kernel_spec.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "tsl/platform/statusor.h"
@@ -41,7 +40,7 @@ class TypedKernelFactory {
   static absl::StatusOr<TypedKernel<Params...>> Create(
       StreamExecutor *executor, const MultiKernelLoaderSpec &spec) {
     TF_ASSIGN_OR_RETURN(std::unique_ptr<Kernel> kernel,
-                        KernelFactory::Create(executor, spec));
+                        executor->LoadKernel(spec));
     return TypedKernel<Params...>(std::move(kernel));
   }
 
@@ -71,19 +70,6 @@ class TypedKernelFactory {
     MultiKernelLoaderSpec loader_spec(
         TypedKernel<Params...>::kNumberOfParameters);
     loader_spec.AddInProcessSymbol(symbol, kernel_name);
-
-    return Create(executor, loader_spec);
-  }
-
-  // Creates a kernel which can be launched with `stream.ThenLaunch(...)` from
-  // an LLVM IR.
-  static absl::StatusOr<TypedKernel<Params...>> Create(
-      StreamExecutor *executor, absl::string_view ir,
-      absl::string_view entrypoint, absl::string_view kernel_name,
-      absl::Span<std::string> options) {
-    MultiKernelLoaderSpec loader_spec(
-        TypedKernel<Params...>::kNumberOfParameters);
-    loader_spec.AddLlvmHostKernel(ir, entrypoint, kernel_name, options);
 
     return Create(executor, loader_spec);
   }
